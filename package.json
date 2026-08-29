@@ -1,0 +1,23 @@
+{
+  "name": "bee-school-office",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint . --max-warnings=0",
+    "test": "node tests/roles.test.js && node tests/trial-booking-imports.test.js && node tests/gmail-trial-booking-worker.test.js && node tests/communications.test.js && node tests/trial-lessons-delete.test.js && node tests/student-questions.test.js",
+    "gmail:reauthorize": "node scripts/gmail-reauthorize.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.112.4",
+    "next": "16.3.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.2"
+  }
+}

@@ -30,7 +30,7 @@ Time of Taiken -> trial_lessons.trial_time
 Student 1 / Student 2 -> trial_lesson_participants rows
 Age group -> trial_lesson_participants.age_group_level_id
 Level -> trial_lesson_participants.requested_level_id or trial_lessons.level_id
-Course -> trial_lessons.level_id when it matches a Bee School class level/course concept
+Course -> source/review field first; do not automatically map to trial_lessons.level_id without an explicit owner-approved mapping table
 Request -> trial_lessons.customer_request
 How they know Bee -> prospects.acquisition_source_id
 Type of lesson -> trial_lessons.lesson_type
@@ -43,3 +43,5 @@ PC -> UNRESOLVED - requires owner definition
 Postal address must not be imported into Prospect or Trial Lesson records. If a source sheet or old paper Taiken form includes address, postal code, or equivalent physical-address fields, leave them out of the trial/prospect import path and defer them to a future enrollment/payment setup model for enrolled customers.
 
 Do not infer or invent mappings for ambiguous columns. Keep raw source values available during future import review when owner definition is required.
+
+The current Gmail Trial Booking flow stores `Course` separately from `Lesson type`. `Course` is reference data during review, and staff select the final class level manually. Future Excel imports should follow the same boundary unless a dedicated mapping model is implemented.

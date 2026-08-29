@@ -770,7 +770,9 @@ tr:last-child td {
 .status-badge.converted,
 .status-badge.finalized,
 .status-badge.paid,
-.status-badge.refunded {
+.status-badge.refunded,
+.status-badge.linked,
+.status-badge.claimed {
   background: #e7f6ee;
   border-color: #b9e2cb;
   color: #1f6d48;
@@ -779,7 +781,10 @@ tr:last-child td {
 .status-badge.dismissed,
 .status-badge.ignored,
 .status-badge.unpaid,
-.status-badge.void {
+.status-badge.void,
+.status-badge.not_invited,
+.status-badge.expired,
+.status-badge.revoked {
   background: #f4f5f6;
   border-color: #d8dde1;
   color: #59636e;
@@ -956,6 +961,17 @@ dd {
   font-size: 0.84rem;
 }
 
+.ai-eigo-status-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-eigo-actions {
+  padding: 0 18px 18px;
+}
+
 .overdue-row td {
   background: #fff7f5;
 }
@@ -1051,7 +1067,8 @@ dd {
 
 .status-badge.queued,
 .status-badge.automated_email_queued,
-.status-badge.scheduled {
+.status-badge.scheduled,
+.status-badge.pending_send {
   background: #fff7df;
   border-color: #efd287;
   color: #775914;
@@ -1059,7 +1076,9 @@ dd {
 
 .status-badge.failed,
 .status-badge.automated_email_failed,
-.status-badge.overdue {
+.status-badge.overdue,
+.status-badge.send_failed,
+.status-badge.manual_review {
   background: #fff5f3;
   border-color: #ffd2cc;
   color: var(--danger);

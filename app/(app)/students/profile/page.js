@@ -12,6 +12,16 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import {
+  applyAiEigoInvitationResult,
+  canSendAiEigoInvitationForStudent,
+  getAiEigoAccessDetail,
+  getAiEigoAccessStatus,
+  getAiEigoInvitationActionLabel,
+  getAiEigoLink,
+  getLatestAiEigoInvitation,
+  getStudentInvitationRecipient
+} from "@/lib/ai-eigo-invitations";
+import {
   formatBillingAmount,
   getChargeAllocatedTotal,
   getChargeBalance,
@@ -38,9 +48,16 @@ import {
   fetchStudentCommunications,
   fetchStudentProfile,
   fetchStudentQuestions,
-  markStudentQuestionDone
+  markStudentQuestionDone,
+  sendAiEigoStudentInvitation
 } from "@/lib/data";
-import { canCreateStudents, canManageBilling, canManageCommunications, canManageStudentQuestions } from "@/lib/roles";
+import {
+  canCreateStudents,
+  canManageAiEigoInvitations,
+  canManageBilling,
+  canManageCommunications,
+  canManageStudentQuestions
+} from "@/lib/roles";
 import {
   createStudentQuestionForm,
   getStudentQuestionDisplayStatus,
@@ -68,6 +85,8 @@ function StudentProfileContent() {
   const studentId = searchParams.get("id") || "";
   const [composerOpen, setComposerOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [aiEigoActionStudentId, setAiEigoActionStudentId] = useState("");
+  const [aiEigoError, setAiEigoError] = useState("");
   const [questionFormOpen, setQuestionFormOpen] = useState(false);
   const [questionForm, setQuestionForm] = useState(createStudentQuestionForm());
   const [questionActionId, setQuestionActionId] = useState("");
@@ -149,6 +168,33 @@ function StudentProfileContent() {
 
     const { data } = await fetchStudentCommunications(supabase, studentId);
     setState((current) => ({ ...current, communications: data || [] }));
+  }
+
+  async function handleSendAiEigoInvitation() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session || !state.student) {
+      setAiEigoError("You must be signed in before sending an AI-EIGO invitation.");
+      return;
+    }
+
+    setAiEigoActionStudentId(state.student.id);
+    setAiEigoError("");
+    setNotice("");
+
+    const { data, error } = await sendAiEigoStudentInvitation(supabase, state.student.id);
+
+    if (error) {
+      setAiEigoError(error.message);
+      setAiEigoActionStudentId("");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      student: applyAiEigoInvitationResult(current.student, data)
+    }));
+    setAiEigoActionStudentId("");
+    setNotice("AI-EIGO invitation queued for secure Gmail sending.");
   }
 
   function updateQuestionForm(field, value) {
@@ -345,6 +391,7 @@ function StudentProfileContent() {
   const mayManageStudentBilling = canManageBilling(profile);
   const mayCommunicate = canManageCommunications(profile);
   const mayManageQuestions = canManageStudentQuestions(profile);
+  const mayManageAiEigo = canManageAiEigoInvitations(profile);
 
   return (
     <>
@@ -491,6 +538,20 @@ function StudentProfileContent() {
             <EmptyState title="No contact details" description="Contact records have not been added for this student." />
           )}
         </DataSurface>
+
+        {mayManageAiEigo ? (
+          <DataSurface>
+            <SurfaceHeader>
+              <h2>AI-EIGO Access</h2>
+            </SurfaceHeader>
+            <AiEigoAccessPanel
+              actionStudentId={aiEigoActionStudentId}
+              error={aiEigoError}
+              onSend={handleSendAiEigoInvitation}
+              student={student}
+            />
+          </DataSurface>
+        ) : null}
 
         <DataSurface>
           <SurfaceHeader>
@@ -693,6 +754,56 @@ function StudentQuestionsTable({
         </tbody>
       </table>
     </ResponsiveTable>
+  );
+}
+
+function AiEigoAccessPanel({ actionStudentId, error, onSend, student }) {
+  const status = getAiEigoAccessStatus(student);
+  const actionLabel = getAiEigoInvitationActionLabel(student);
+  const canSend = canSendAiEigoInvitationForStudent(student);
+  const recipient = getStudentInvitationRecipient(student);
+  const invitation = getLatestAiEigoInvitation(student);
+  const link = getAiEigoLink(student);
+  const sending = actionStudentId === student.id;
+
+  return (
+    <>
+      {error ? <p className="inline-alert">{error}</p> : null}
+      <dl className="detail-list">
+        <div>
+          <dt>Status</dt>
+          <dd>
+            <span className="ai-eigo-status-line">
+              <StatusBadge value={status} />
+              <span>{getAiEigoAccessDetail(student)}</span>
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Email</dt>
+          <dd>{recipient || "No email contact"}</dd>
+        </div>
+        {invitation?.token_expires_at ? (
+          <div>
+            <dt>Invitation expires</dt>
+            <dd>{formatDate(invitation.token_expires_at)}</dd>
+          </div>
+        ) : null}
+        {link?.linked_at ? (
+          <div>
+            <dt>Linked at</dt>
+            <dd>{formatDate(link.linked_at)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {actionLabel ? (
+        <div className="form-actions ai-eigo-actions">
+          <button className="secondary-button" disabled={sending || !canSend} onClick={onSend} type="button">
+            {sending ? "Queuing..." : actionLabel}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 

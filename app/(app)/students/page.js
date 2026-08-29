@@ -7,15 +7,25 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
+import {
+  applyAiEigoInvitationResult,
+  canSendAiEigoInvitationForStudent,
+  getAiEigoAccessDetail,
+  getAiEigoAccessStatus,
+  getAiEigoInvitationActionLabel
+} from "@/lib/ai-eigo-invitations";
 import { formatDate, formatEnrollment, formatPersonName } from "@/lib/format";
-import { fetchStudents } from "@/lib/data";
-import { canCreateStudents } from "@/lib/roles";
+import { fetchStudents, sendAiEigoStudentInvitation } from "@/lib/data";
+import { canCreateStudents, canManageAiEigoInvitations } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function StudentsPage() {
   const { profile, session } = useAuth();
   const [search, setSearch] = useState("");
   const [state, setState] = useState({ loading: true, error: "", students: [] });
+  const [notice, setNotice] = useState("");
+  const [aiEigoActionStudentId, setAiEigoActionStudentId] = useState("");
+  const mayManageAiEigo = canManageAiEigoInvitations(profile);
 
   useEffect(() => {
     let active = true;
@@ -42,6 +52,33 @@ export default function StudentsPage() {
       window.clearTimeout(timer);
     };
   }, [search, session]);
+
+  async function handleSendAiEigoInvitation(student) {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setState((current) => ({ ...current, error: "You must be signed in before sending an AI-EIGO invitation." }));
+      return;
+    }
+
+    setAiEigoActionStudentId(student.id);
+    setNotice("");
+    setState((current) => ({ ...current, error: "" }));
+
+    const { data, error } = await sendAiEigoStudentInvitation(supabase, student.id);
+
+    if (error) {
+      setState((current) => ({ ...current, error: error.message }));
+      setAiEigoActionStudentId("");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      students: current.students.map((row) => (row.id === student.id ? applyAiEigoInvitationResult(row, data) : row))
+    }));
+    setAiEigoActionStudentId("");
+    setNotice("AI-EIGO invitation queued for secure Gmail sending.");
+  }
 
   return (
     <>
@@ -71,6 +108,7 @@ export default function StudentsPage() {
       </div>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
+      {notice ? <p className="inline-success">{notice}</p> : null}
 
       <DataSurface aria-label="Students list">
         {state.loading ? (
@@ -85,6 +123,7 @@ export default function StudentsPage() {
                   <th>School</th>
                   <th>Course / class</th>
                   <th>Start date</th>
+                  {mayManageAiEigo ? <th>AI-EIGO</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -99,6 +138,15 @@ export default function StudentsPage() {
                     <td>{student.schools?.name || "Unassigned"}</td>
                     <td>{formatEnrollment(student.student_enrollments)}</td>
                     <td>{formatDate(student.start_date)}</td>
+                    {mayManageAiEigo ? (
+                      <td>
+                        <AiEigoStudentListCell
+                          actionStudentId={aiEigoActionStudentId}
+                          onSend={handleSendAiEigoInvitation}
+                          student={student}
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -109,5 +157,29 @@ export default function StudentsPage() {
         )}
       </DataSurface>
     </>
+  );
+}
+
+function AiEigoStudentListCell({ actionStudentId, onSend, student }) {
+  const status = getAiEigoAccessStatus(student);
+  const actionLabel = getAiEigoInvitationActionLabel(student);
+  const canSend = canSendAiEigoInvitationForStudent(student);
+  const sending = actionStudentId === student.id;
+
+  return (
+    <div className="table-cell-stack">
+      <StatusBadge value={status} />
+      <span>{getAiEigoAccessDetail(student)}</span>
+      {actionLabel ? (
+        <button
+          className="secondary-button"
+          disabled={sending || !canSend}
+          onClick={() => onSend(student)}
+          type="button"
+        >
+          {sending ? "Queuing..." : actionLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }

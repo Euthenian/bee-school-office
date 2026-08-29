@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint . --max-warnings=0",
-    "test": "node tests/roles.test.js && node tests/trial-booking-imports.test.js && node tests/gmail-trial-booking-worker.test.js && node tests/communications.test.js && node tests/trial-lessons-delete.test.js && node tests/student-questions.test.js",
+    "test": "node tests/roles.test.js && node tests/trial-booking-imports.test.js && node tests/gmail-trial-booking-worker.test.js && node tests/gmail-trial-booking-cron-alerts.test.js && node tests/communications.test.js && node tests/trial-lessons-delete.test.js && node tests/student-questions.test.js && node tests/ai-eigo-invitations.test.js",
     "gmail:reauthorize": "node scripts/gmail-reauthorize.js"
   },
   "dependencies": {

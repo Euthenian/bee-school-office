@@ -22,10 +22,34 @@ import {
 } from "../lib/data.js";
 import { canManageAiEigoInvitations } from "../lib/roles.js";
 
-const aiEigoInvitationSql = readFileSync(
+const aiEigoBaseInvitationSql = readFileSync(
   new URL("../supabase/migrations/20260829002000_ai_eigo_student_invitations.sql", import.meta.url),
   "utf8"
 );
+const aiEigoClaimIdempotencySql = readFileSync(
+  new URL("../supabase/migrations/20260829003000_ai_eigo_claim_idempotency.sql", import.meta.url),
+  "utf8"
+);
+const aiEigoPgcryptoQualificationSql = readFileSync(
+  new URL("../supabase/migrations/20260831001000_fix_ai_eigo_invitation_pgcrypto_qualification.sql", import.meta.url),
+  "utf8"
+);
+const aiEigoInvitationSql = `${aiEigoBaseInvitationSql}\n${aiEigoClaimIdempotencySql}\n${aiEigoPgcryptoQualificationSql}`;
+const latestPrepareSql = extractMigrationFunctionSql(
+  aiEigoPgcryptoQualificationSql,
+  "prepare_ai_eigo_student_invitation_email_mvp",
+  "uuid"
+);
+const latestVerifySql = extractMigrationFunctionSql(
+  aiEigoPgcryptoQualificationSql,
+  "verify_ai_eigo_student_invitation_mvp",
+  "text"
+);
+const latestClaimSql =
+  extractMigrationFunctionSql(aiEigoPgcryptoQualificationSql, "claim_ai_eigo_student_invitation_mvp", "text, text, text") ||
+  extractMigrationFunctionSql(aiEigoClaimIdempotencySql, "claim_ai_eigo_student_invitation_mvp", "text, text, text") ||
+  aiEigoClaimIdempotencySql;
+const latestPrivilegedInvitationSql = [latestPrepareSql, latestVerifySql, latestClaimSql].join("\n");
 const studentsPage = readFileSync(new URL("../app/(app)/students/page.js", import.meta.url), "utf8");
 const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/page.js", import.meta.url), "utf8");
 const communicationsWorkerSource = readFileSync(new URL("../lib/communications-worker.js", import.meta.url), "utf8");
@@ -94,6 +118,19 @@ test("AI-EIGO authorization follows school-managed student access and keeps priv
   assert.match(aiEigoInvitationSql, /coalesce\(\(select auth\.role\(\)\), ''\) <> 'service_role'/);
   assert.match(aiEigoInvitationSql, /grant execute on function public\.claim_ai_eigo_student_invitation_mvp\(text, text, text\) to service_role/);
   assert.doesNotMatch(aiEigoInvitationSql, /grant execute on function public\.claim_ai_eigo_student_invitation_mvp\(text, text, text\) to authenticated/);
+});
+
+test("AI-EIGO privileged invitation RPCs qualify pgcrypto under the restricted search path", () => {
+  assert.ok(latestPrepareSql);
+  assert.ok(latestVerifySql);
+  assert.ok(latestClaimSql);
+  assert.match(latestPrivilegedInvitationSql, /security definer[\s\S]*set search_path = public, pg_temp/);
+  assert.doesNotMatch(latestPrivilegedInvitationSql, /set search_path = public,\s*extensions|set search_path = extensions/i);
+  assert.match(latestPrepareSql, /extensions\.gen_random_bytes\(32\)/);
+  assert.match(latestPrepareSql, /extensions\.digest\(v_raw_token, 'sha256'\)/);
+  assert.match(latestVerifySql, /extensions\.digest\(trim\(p_token\), 'sha256'\)/);
+  assert.match(latestClaimSql, /extensions\.digest\(trim\(p_token\), 'sha256'\)/);
+  assert.deepEqual(listUnqualifiedPgcryptoCalls(latestPrivilegedInvitationSql), []);
 });
 
 test("send invitation RPC queues the existing Gmail integration and returns the created invitation state", async () => {
@@ -223,7 +260,11 @@ test("secure invitation tokens are random, hashed, expiring, and single-claim", 
   assert.match(aiEigoInvitationSql, /set status = 'expired'/);
   assert.match(aiEigoInvitationSql, /if v_invitation\.claimed_at is not null or v_invitation\.status = 'claimed' then/);
   assert.match(aiEigoInvitationSql, /set status = 'claimed'/);
-  assert.match(aiEigoInvitationSql, /token_hash = null/);
+  assert.match(aiEigoClaimIdempotencySql, /status = 'claimed'[\s\S]*and \(token_hash is null or token_expires_at is not null\)/);
+  const latestClaimedUpdate =
+    latestClaimSql.match(/update public\.ai_eigo_student_invitations inv\s+set status = 'claimed'[\s\S]*?where inv\.id = v_invitation\.id;/)?.[0] || "";
+  assert.doesNotMatch(latestClaimedUpdate, /token_hash\s*=/);
+  assert.doesNotMatch(latestClaimedUpdate, /token_expires_at\s*=/);
 });
 
 test("AI-EIGO claim contract links the student and only returns canonical bee entitlement", () => {
@@ -233,6 +274,60 @@ test("AI-EIGO claim contract links the student and only returns canonical bee en
   assert.match(aiEigoInvitationSql, /v_link\.entitlement_code/);
   assert.match(aiEigoInvitationSql, /'bee'/);
   assert.doesNotMatch(aiEigoInvitationSql, /all Premium|Ai-eigo Plus|arbitrary future Premium|avatar/i);
+});
+
+test("AI-EIGO claim contract is idempotent only for the same linked user", () => {
+  assert.match(aiEigoClaimIdempotencySql, /drop function if exists public\.claim_ai_eigo_student_invitation_mvp\(text, text, text\)/);
+  assert.match(latestClaimSql, /claim_status text/);
+  assert.match(latestClaimSql, /v_claim_user_id = trim\(p_ai_eigo_user_id\)/);
+  assert.match(latestClaimSql, /where inv\.token_hash = v_hash/);
+  assert.match(latestClaimSql, /if v_invitation\.claimed_at is not null or v_invitation\.status = 'claimed' then/);
+  assert.match(latestClaimSql, /if v_invitation\.claimed_ai_eigo_user_id = v_claim_user_id then/);
+  assert.match(latestClaimSql, /where link\.student_id = v_invitation\.student_id\s+and link\.ai_eigo_user_id = v_claim_user_id/);
+  assert.match(latestClaimSql, /'already_linked_same_user'::text/);
+  assert.match(latestClaimSql, /'linked'::text/);
+  assert.match(latestClaimSql, /AI-EIGO invitation has already been claimed by another AI-EIGO user/);
+});
+
+test("AI-EIGO claim retry does not create duplicate links or change link identity", () => {
+  const claimedBranch =
+    latestClaimSql.match(
+      /if v_invitation\.claimed_at is not null or v_invitation\.status = 'claimed' then[\s\S]*?raise exception 'AI-EIGO invitation has already been claimed by another AI-EIGO user.';/
+    )?.[0] || "";
+
+  assert.doesNotMatch(claimedBranch, /insert into public\.ai_eigo_student_links/);
+  assert.doesNotMatch(claimedBranch, /update public\.ai_eigo_student_invitations[\s\S]*status = 'manual_review'/);
+  assert.match(claimedBranch, /v_link\.student_id/);
+  assert.match(claimedBranch, /v_link\.organization_id/);
+  assert.match(claimedBranch, /v_link\.school_id/);
+  assert.match(claimedBranch, /v_link\.ai_eigo_user_id/);
+  assert.match(claimedBranch, /v_link\.ai_eigo_email::text/);
+  assert.match(claimedBranch, /v_link\.entitlement_code/);
+  assert.match(claimedBranch, /v_link\.linked_at/);
+});
+
+test("AI-EIGO verify reports claimed invitations as non-claimable information", () => {
+  const verifySql =
+    aiEigoBaseInvitationSql.match(
+      /create or replace function public\.verify_ai_eigo_student_invitation_mvp[\s\S]*?grant execute on function public\.verify_ai_eigo_student_invitation_mvp\(text\) to service_role;/
+    )?.[0] || "";
+
+  assert.match(verifySql, /when v_row\.claimed_at is not null then 'claimed'/);
+  assert.match(verifySql, /v_row\.status = 'sent'\s+and v_row\.revoked_at is null\s+and v_row\.claimed_at is null\s+and v_row\.token_expires_at > now\(\)/);
+  assert.match(verifySql, /when v_row\.claimed_at is not null then 'already_claimed'/);
+});
+
+test("AI-EIGO terminal and exception claim paths stay protected", () => {
+  assert.match(latestClaimSql, /if v_invitation\.revoked_at is not null or v_invitation\.status = 'revoked' then/);
+  assert.match(latestClaimSql, /AI-EIGO invitation has been revoked/);
+  assert.match(latestClaimSql, /if v_invitation\.token_expires_at is null or v_invitation\.token_expires_at <= v_now then/);
+  assert.match(latestClaimSql, /AI-EIGO invitation has expired/);
+  assert.match(latestClaimSql, /if v_claim_email <> v_invitation\.recipient_email then/);
+  assert.match(latestClaimSql, /status = 'manual_review'/);
+  assert.match(latestClaimSql, /AI-EIGO login email did not match the invitation recipient/);
+  assert.match(latestClaimSql, /Invitation recipient email is shared by multiple Bee students/);
+  assert.match(latestClaimSql, /where link\.student_id = v_invitation\.student_id\s+or link\.ai_eigo_user_id = v_claim_user_id/);
+  assert.match(aiEigoBaseInvitationSql, /set status = 'revoked'[\s\S]*where inv\.student_id = v_student\.id/);
 });
 
 test("mismatched or shared AI-EIGO accounts go to manual review instead of auto-granting Bee", () => {
@@ -276,4 +371,20 @@ function quietLogger() {
   return {
     error() {}
   };
+}
+
+function extractMigrationFunctionSql(sql, functionName, grantArgs) {
+  return (
+    sql.match(
+      new RegExp(
+        `create or replace function public\\.${functionName}[\\s\\S]*?grant execute on function public\\.${functionName}\\(${grantArgs}\\) to service_role;`
+      )
+    )?.[0] || ""
+  );
+}
+
+function listUnqualifiedPgcryptoCalls(sql) {
+  return [...sql.matchAll(/\b(?:digest|gen_random_bytes)\s*\(/g)]
+    .filter((match) => sql.slice(Math.max(0, match.index - "extensions.".length), match.index) !== "extensions.")
+    .map((match) => match[0]);
 }

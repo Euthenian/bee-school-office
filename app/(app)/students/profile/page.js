@@ -194,7 +194,7 @@ function StudentProfileContent() {
       student: applyAiEigoInvitationResult(current.student, data)
     }));
     setAiEigoActionStudentId("");
-    setNotice("AI-EIGO invitation queued for secure Gmail sending.");
+    setNotice("AI-EIGO invitation queued for secure email sending.");
   }
 
   function updateQuestionForm(field, value) {

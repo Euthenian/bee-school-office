@@ -120,13 +120,13 @@ Implemented modules include:
 - Expenses: expense categories, expenses, summary RPC, void workflow, restricted UI.
 - Finance Dashboard: super-admin overview aggregating Billing, Payroll, and Expenses without introducing a separate ledger.
 - Student Questions / Reminders: student questions table, student-profile section, global Questions page, due/overdue badge.
-- AI-EIGO Student Invitations: secure personal invitation state, existing Gmail dispatch reuse, service-role-only AI-EIGO verify/claim RPC contract, and per-student status/actions. See [AI-EIGO Student Invitations](./ai-eigo-student-invitations.md).
+- AI-EIGO Student Invitations: secure personal invitation state, existing communications dispatch with Resend outbound delivery, service-role-only AI-EIGO verify/claim RPC contract, and per-student status/actions. See [AI-EIGO Student Invitations](./ai-eigo-student-invitations.md).
 
 ## AI-EIGO Invitation Boundary
 
 Bee School Office is the source of truth for Bee student access to AI-EIGO. The normal activation flow is a personal secure invitation email, not a classroom QR code, generic public entitlement URL, or shared Bee code.
 
-Bee School Office stores only hashed invitation tokens. The existing Gmail dispatch Edge Function prepares the raw token in memory immediately before sending. AI-EIGO must claim invitations from its server through service-role-only Bee School Office RPCs and activate only the canonical `bee` entitlement in AI-EIGO.
+Bee School Office stores only hashed invitation tokens. The existing communications dispatch Edge Function prepares the raw token in memory immediately before sending the invitation through Resend. AI-EIGO must claim invitations from its server through service-role-only Bee School Office RPCs and activate only the canonical `bee` entitlement in AI-EIGO.
 
 The Bee School Office side is implemented in this repository. Production use still requires the AI-EIGO application to host the invite route and perform its server-side claim and entitlement activation step.
 
@@ -220,7 +220,7 @@ Verified in the repository and, for recent feature tables, by non-mutating remot
 
 ## Implemented But Operationally Configured Outside The Repo
 
-- Supabase Edge Function secrets for Gmail, service-role access, and Cron shared secrets.
+- Supabase Edge Function secrets for Gmail, Resend, service-role access, and Cron shared secrets.
 - `TRIAL_BOOKING_CRON_ALERT_EMAIL` for Gmail Trial Booking Cron critical/recovery email recipients.
 - Supabase Cron job `bee-school-gmail-trial-booking-poll` with cadence `*/15 * * * *`.
 - Gmail OAuth mailbox authorization.

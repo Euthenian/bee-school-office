@@ -34,7 +34,15 @@ const aiEigoPgcryptoQualificationSql = readFileSync(
   new URL("../supabase/migrations/20260831001000_fix_ai_eigo_invitation_pgcrypto_qualification.sql", import.meta.url),
   "utf8"
 );
-const aiEigoInvitationSql = `${aiEigoBaseInvitationSql}\n${aiEigoClaimIdempotencySql}\n${aiEigoPgcryptoQualificationSql}`;
+const aiEigoResendProviderSql = readFileSync(
+  new URL("../supabase/migrations/20260831002000_ai_eigo_invitation_resend_provider.sql", import.meta.url),
+  "utf8"
+);
+const aiEigoInvitationSql = `${aiEigoBaseInvitationSql}\n${aiEigoClaimIdempotencySql}\n${aiEigoPgcryptoQualificationSql}\n${aiEigoResendProviderSql}`;
+const latestSendSql =
+  aiEigoResendProviderSql.match(
+    /create or replace function public\.send_ai_eigo_student_invitation_mvp[\s\S]*?grant execute on function public\.send_ai_eigo_student_invitation_mvp\(uuid\) to authenticated;/
+  )?.[0] || aiEigoBaseInvitationSql;
 const latestPrepareSql = extractMigrationFunctionSql(
   aiEigoPgcryptoQualificationSql,
   "prepare_ai_eigo_student_invitation_email_mvp",
@@ -66,9 +74,15 @@ test("student architecture uses contacts for invitation email and surfaces AI-EI
   };
 
   assert.match(studentListSelect, /student_contacts \(/);
-  assert.match(studentListSelect, /ai_eigo_student_invitations:ai_eigo_student_invitations/);
+  assert.match(
+    studentListSelect,
+    /ai_eigo_student_invitations:ai_eigo_student_invitations!ai_eigo_student_invitations_student_id_fkey/
+  );
   assert.match(studentListSelect, /ai_eigo_student_links:ai_eigo_student_links/);
-  assert.match(studentProfileSelect, /ai_eigo_student_invitations:ai_eigo_student_invitations/);
+  assert.match(
+    studentProfileSelect,
+    /ai_eigo_student_invitations:ai_eigo_student_invitations!ai_eigo_student_invitations_student_id_fkey/
+  );
   assert.match(studentProfileSelect, /ai_eigo_student_links:ai_eigo_student_links/);
   assert.match(studentAiEigoInvitationSelect, /\bstatus\b/);
   assert.match(studentAiEigoLinkSelect, /\bentitlement_code\b/);
@@ -133,7 +147,7 @@ test("AI-EIGO privileged invitation RPCs qualify pgcrypto under the restricted s
   assert.deepEqual(listUnqualifiedPgcryptoCalls(latestPrivilegedInvitationSql), []);
 });
 
-test("send invitation RPC queues the existing Gmail integration and returns the created invitation state", async () => {
+test("send invitation RPC queues the existing Resend integration and returns the created invitation state", async () => {
   const calls = [];
   const supabase = {
     async rpc(name, params) {
@@ -146,32 +160,39 @@ test("send invitation RPC queues the existing Gmail integration and returns the 
   };
 
   const result = await sendAiEigoStudentInvitation(supabase, "student-1");
-  const actionPayload = aiEigoInvitationSql.match(/jsonb_build_object\([\s\S]*?'invitation_id', v_invitation_id[\s\S]*?\)/)?.[0] || "";
+  const actionPayload = latestSendSql.match(/jsonb_build_object\([\s\S]*?'invitation_id', v_invitation_id[\s\S]*?\)/)?.[0] || "";
 
   assert.deepEqual(calls, [["rpc", "send_ai_eigo_student_invitation_mvp", { p_student_id: "student-1" }]]);
   assert.equal(result.data.id, "invite-1");
-  assert.match(aiEigoInvitationSql, /insert into public\.communications/);
-  assert.match(aiEigoInvitationSql, /insert into public\.communication_integration_actions/);
+  assert.match(latestSendSql, /insert into public\.communications/);
+  assert.match(latestSendSql, /insert into public\.communication_integration_actions/);
   assert.match(aiEigoInvitationSql, /where ct\.template_key = 'ai_eigo_student_invitation'/);
   assert.match(aiEigoInvitationSql, /public\.render_text_template\(v_template\.body_template, v_context\)/);
-  assert.match(aiEigoInvitationSql, /'gmail'/);
-  assert.match(aiEigoInvitationSql, /'send_email'/);
+  assert.match(latestSendSql, /'resend'/);
+  assert.match(latestSendSql, /'send_email'/);
+  assert.match(latestSendSql, /:resend_send/);
+  assert.doesNotMatch(latestSendSql, /:gmail_send|'gmail'/);
   assert.match(actionPayload, new RegExp(`'template_key', '${AI_EIGO_INVITATION_TEMPLATE_KEY}'`));
   assert.match(actionPayload, /'invitation_id', v_invitation_id/);
   assert.doesNotMatch(actionPayload, /https:\/\/ai-eigo\.com|v_raw_token|token_hash|invitation_link/i);
 });
 
-test("communications worker prepares AI-EIGO invitation email just in time and reuses Gmail sender", async () => {
+test("communications worker prepares AI-EIGO invitation email just in time and uses Resend sender", async () => {
   const emails = [];
   const records = [];
   const prepared = [];
 
   const result = await processQueuedCommunicationActions({
-    config: { googleReady: true, maxActions: 10 },
+    config: { googleReady: true, resendReady: true, maxActions: 10 },
     emailProvider: {
+      async sendEmail() {
+        throw new Error("Gmail should not be used for AI-EIGO invitations.");
+      }
+    },
+    resendProvider: {
       async sendEmail(payload) {
         emails.push(payload);
-        return { externalId: "gmail-message-1", responsePayload: { id: "gmail-message-1" }, status: "succeeded" };
+        return { externalId: "resend-message-1", responsePayload: { id: "resend-message-1" }, status: "succeeded" };
       }
     },
     calendarProvider: {
@@ -187,7 +208,7 @@ test("communications worker prepares AI-EIGO invitation email just in time and r
         return [
           {
             idempotency_key: "ai-eigo-invite-email",
-            provider: "gmail",
+            provider: "resend",
             action_type: "send_email",
             request_payload: {
               template_key: AI_EIGO_INVITATION_TEMPLATE_KEY,
@@ -216,7 +237,8 @@ test("communications worker prepares AI-EIGO invitation email just in time and r
   assert.equal(emails[0].recipient, "student@example.com");
   assert.match(emails[0].body, /https:\/\/ai-eigo\.com\/invite\/secure-token/);
   assert.equal(records[0].status, "succeeded");
-  assert.match(communicationsWorkerSource, /createGmailSenderClient/);
+  assert.equal(records[0].externalId, "resend-message-1");
+  assert.match(communicationsWorkerSource, /createResendSenderClient/);
   assert.match(communicationsWorkerSource, /prepareAiEigoInvitationEmail/);
 });
 
@@ -364,6 +386,7 @@ test("student UI shows AI-EIGO status and send/resend actions without QR-code ac
   assert.match(studentsPage, /AiEigoStudentListCell/);
   assert.match(studentProfilePage, /AI-EIGO Access/);
   assert.match(studentProfilePage, /handleSendAiEigoInvitation/);
+  assert.doesNotMatch(`${studentsPage}\n${studentProfilePage}`, /secure Gmail sending/);
   assert.doesNotMatch(`${studentsPage}\n${studentProfilePage}\n${communicationsWorkerSource}`, /QRCode|qr_code|classroom QR|generic Bee code/i);
 });
 

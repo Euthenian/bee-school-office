@@ -77,7 +77,7 @@ export default function StudentsPage() {
       students: current.students.map((row) => (row.id === student.id ? applyAiEigoInvitationResult(row, data) : row))
     }));
     setAiEigoActionStudentId("");
-    setNotice("AI-EIGO invitation queued for secure Gmail sending.");
+    setNotice("AI-EIGO invitation queued for secure email sending.");
   }
 
   return (

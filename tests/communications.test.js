@@ -7,6 +7,7 @@ import {
   renderTemplate
 } from "../lib/communication-templates.js";
 import {
+  createResendSenderClient,
   processQueuedCommunicationActions,
   readCommunicationsWorkerConfig
 } from "../lib/communications-worker.js";
@@ -23,6 +24,10 @@ const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/p
 const trialLessonsPage = readFileSync(new URL("../app/(app)/trial-lessons/page.js", import.meta.url), "utf8");
 const communicationsEdgeFunction = readFileSync(
   new URL("../supabase/functions/communications-dispatch/index.ts", import.meta.url),
+  "utf8"
+);
+const gmailTrialBookingWorkerSource = readFileSync(
+  new URL("../lib/gmail-trial-booking-worker.js", import.meta.url),
   "utf8"
 );
 
@@ -131,10 +136,76 @@ test("communications Edge Function uses server secrets and reports setup-require
     "GOOGLE_GMAIL_SENDER_EMAIL",
     "GOOGLE_CALENDAR_ID"
   ]);
+  assert.equal(config.resendReady, false);
+  assert.deepEqual(config.missingResendSecrets, ["RESEND_API_KEY", "AI_EIGO_INVITATION_EMAIL_FROM"]);
   assert.match(communicationsEdgeFunction, /COMMUNICATIONS_CRON_SECRET/);
+  assert.match(communicationsEdgeFunction, /createResendSenderClient/);
   assert.match(communicationsWorkerSource, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(communicationsWorkerSource, /RESEND_API_KEY/);
+  assert.match(communicationsWorkerSource, /AI_EIGO_INVITATION_EMAIL_FROM/);
   assert.doesNotMatch(studentProfilePage, /SERVICE_ROLE|GOOGLE_CLIENT_SECRET|GOOGLE_REFRESH_TOKEN/);
   assert.doesNotMatch(trialLessonsPage, /SERVICE_ROLE|GOOGLE_CLIENT_SECRET|GOOGLE_REFRESH_TOKEN/);
+  assert.match(gmailTrialBookingWorkerSource, /GMAIL_SOURCE_MAILBOX/);
+  assert.match(gmailTrialBookingWorkerSource, /https:\/\/gmail\.googleapis\.com\/gmail\/v1/);
+  assert.doesNotMatch(gmailTrialBookingWorkerSource, /RESEND_API_KEY|AI_EIGO_INVITATION_EMAIL_FROM|resend/i);
+});
+
+test("Resend sender posts server-side email payloads and records the provider message id", async () => {
+  const requests = [];
+  const client = createResendSenderClient(
+    { apiKey: "resend-key", from: "AI-EIGO <hello@ai-eigo.com>" },
+    async (url, options = {}) => {
+      requests.push({ url: String(url), options });
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({ id: "resend-message-1" });
+        }
+      };
+    }
+  );
+
+  const result = await client.sendEmail({
+    recipient: "student@example.com",
+    subject: "Bee School AI-EIGO access invitation",
+    body: "Please use https://ai-eigo.com/invite/secure-token"
+  });
+  const requestBody = JSON.parse(requests[0].options.body);
+
+  assert.equal(requests[0].url, "https://api.resend.com/emails");
+  assert.equal(requests[0].options.method, "POST");
+  assert.equal(requests[0].options.headers.Authorization, "Bearer resend-key");
+  assert.equal(requestBody.from, "AI-EIGO <hello@ai-eigo.com>");
+  assert.deepEqual(requestBody.to, ["student@example.com"]);
+  assert.equal(requestBody.subject, "Bee School AI-EIGO access invitation");
+  assert.match(requestBody.text, /secure-token/);
+  assert.match(requestBody.html, /secure-token/);
+  assert.equal(result.externalId, "resend-message-1");
+  assert.deepEqual(result.responsePayload, { id: "resend-message-1" });
+  assert.equal(result.status, "succeeded");
+});
+
+test("Resend sender failures do not report success", async () => {
+  const client = createResendSenderClient(
+    { apiKey: "resend-key", from: "AI-EIGO <hello@ai-eigo.com>" },
+    async () => ({
+      ok: false,
+      status: 403,
+      async text() {
+        return "";
+      }
+    })
+  );
+
+  await assert.rejects(
+    () =>
+      client.sendEmail({
+        recipient: "student@example.com",
+        subject: "Subject",
+        body: "Body"
+      }),
+    /Resend send failed with HTTP 403/
+  );
 });
 
 test("communications worker processes queued email and calendar actions idempotently", async () => {

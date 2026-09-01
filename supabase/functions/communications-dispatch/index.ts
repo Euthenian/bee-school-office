@@ -1,6 +1,7 @@
 import {
   createGmailSenderClient,
   createGoogleCalendarClient,
+  createResendSenderClient,
   createSupabaseRestCommunicationsRepository,
   processQueuedCommunicationActions,
   readCommunicationsWorkerConfig,
@@ -20,7 +21,7 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Unauthorized." }, 401);
   }
 
-  const { config, errors, missingGoogleSecrets } = readCommunicationsWorkerConfig((name: string) =>
+  const { config, errors } = readCommunicationsWorkerConfig((name: string) =>
     Deno.env.get(name)
   );
   if (errors.length) {
@@ -35,44 +36,44 @@ Deno.serve(async (request) => {
     fetch,
   );
 
-  if (missingGoogleSecrets.length) {
-    const enqueued = await repository.enqueueDueNoShowFollowUps({ limit: config.maxActions });
-    return jsonResponse(
-      {
-        ok: false,
-        setupRequired: true,
-        missingGoogleSecrets,
-        enqueuedNoShowFollowUps: Array.isArray(enqueued) ? enqueued.length : 0,
-      },
-      200,
-    );
-  }
-
   const result = await processQueuedCommunicationActions({
     config,
-    emailProvider: createGmailSenderClient(
-      {
-        clientId: config.googleClientId,
-        clientSecret: config.googleClientSecret,
-        refreshToken: config.googleRefreshToken,
-        senderEmail: config.gmailSenderEmail,
-      },
-      fetch,
-    ),
-    calendarProvider: createGoogleCalendarClient(
-      {
-        calendarId: config.googleCalendarId,
-        clientId: config.googleClientId,
-        clientSecret: config.googleClientSecret,
-        refreshToken: config.googleRefreshToken,
-        timeZone: config.googleCalendarTimeZone,
-      },
-      fetch,
-    ),
+    emailProvider: config.googleReady
+      ? createGmailSenderClient(
+          {
+            clientId: config.googleClientId,
+            clientSecret: config.googleClientSecret,
+            refreshToken: config.googleRefreshToken,
+            senderEmail: config.gmailSenderEmail,
+          },
+          fetch,
+        )
+      : null,
+    resendProvider: config.resendReady
+      ? createResendSenderClient(
+          {
+            apiKey: config.resendApiKey,
+            from: config.aiEigoInvitationEmailFrom,
+          },
+          fetch,
+        )
+      : null,
+    calendarProvider: config.googleReady
+      ? createGoogleCalendarClient(
+          {
+            calendarId: config.googleCalendarId,
+            clientId: config.googleClientId,
+            clientSecret: config.googleClientSecret,
+            refreshToken: config.googleRefreshToken,
+            timeZone: config.googleCalendarTimeZone,
+          },
+          fetch,
+        )
+      : null,
     repository,
   });
 
-  return jsonResponse(result, result.ok ? 200 : 502);
+  return jsonResponse(result, result.ok || result.setupRequired ? 200 : 502);
 });
 
 function jsonResponse(body: unknown, status: number) {

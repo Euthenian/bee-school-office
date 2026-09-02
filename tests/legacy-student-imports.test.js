@@ -27,6 +27,7 @@ test("legacy importer ignores owner-approved obsolete columns even when populate
         Mail: "aki@example.com",
         "Name Suffix": "old suffix",
         "To finance": "old finance note",
+        "Link To finance": "old finance link",
         "RICO Next fee": "1000",
         "Detail next fee": "old detail",
         Column2: "legacy helper"
@@ -46,6 +47,28 @@ test("legacy importer ignores owner-approved obsolete columns even when populate
   }
 });
 
+test("link-to-finance alias is ignored and phonetic or phone-label headers are not treated as phone values", () => {
+  const dryRun = buildLegacyStudentImportDryRun({
+    workbook: workbookFromRows([
+      {
+        CustomerID: "B-001",
+        Active: "yes",
+        t: "Aki",
+        "Last Name": "Tanaka",
+        "Link To finance": "old finance link",
+        "Phonetic First Name": "??",
+        "Phonetic Last Name": "???",
+        "Phone 2 - label": "Mother",
+        "Phone 2 - label2": "Father"
+      }
+    ])
+  });
+
+  assert.equal(dryRun.rows[0].warnings.some((warning) => warning.code === "invalid_phone"), false);
+  assert.equal(dryRun.rows[0].unresolved.some((item) => item.column === "Link To finance"), false);
+  assert.equal(dryRun.summary.unresolved_fields.some((item) => item.value === "Link To finance"), false);
+  assert.deepEqual(dryRun.rows[0].normalized_candidate.contacts, []);
+});
 test("birthday takes priority over age and age is used only when birthday is blank", () => {
   const dryRun = buildLegacyStudentImportDryRun({
     workbook: workbookFromRows([
@@ -168,6 +191,30 @@ test("direct xlsx parsing reads workbook sheets, headers, and rows from a local 
   assert.equal(dryRun.rows[0].normalized_candidate.contacts[0].value, "aki@example.com");
 });
 
+test("direct xlsx parsing preserves sparse columns in the header row", () => {
+  const directory = mkdtempSync(join(tmpdir(), "bee-legacy-import-sparse-"));
+  const workbookPath = join(directory, "legacy-sparse.xlsx");
+  writeFileSync(
+    workbookPath,
+    createStoredZip({
+      "xl/workbook.xml": workbookXml(),
+      "xl/_rels/workbook.xml.rels": workbookRelationshipsXml(),
+      "xl/worksheets/sheet1.xml": worksheetXml([
+        ["CustomerID", "", "t", "Last Name"],
+        ["B-001", "", "Aki", "Tanaka"]
+      ])
+    })
+  );
+
+  const workbook = readLegacyStudentWorkbook(workbookPath);
+  const dryRun = buildLegacyStudentImportDryRun({ workbook });
+
+  assert.deepEqual(workbook.sheets[0].headers, ["CustomerID", "Column2", "t", "Last Name"]);
+  assert.equal(dryRun.summary.total_source_rows, 1);
+  assert.equal(dryRun.rows[0].normalized_candidate.legacy_customer_id, "B-001");
+  assert.equal(dryRun.rows[0].normalized_candidate.first_name, "Aki");
+  assert.equal(dryRun.rows[0].normalized_candidate.last_name, "Tanaka");
+});
 test("legacy import staging migration is admin-scoped and keeps obsolete fields out of production schema", () => {
   assert.match(migrationSql, new RegExp(`create table if not exists public\\.${LEGACY_STUDENT_IMPORT_BATCHES_TABLE}`));
   assert.match(migrationSql, new RegExp(`create table if not exists public\\.${LEGACY_STUDENT_IMPORT_ROWS_TABLE}`));

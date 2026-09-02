@@ -1,5 +1,60 @@
 # Bee School Office Excel Import Mapping
 
+## One-Time Legacy Student Workbook Import
+
+The legacy Bee School student workbook must go through a dry-run/staging pass before any production student records are created. Use:
+
+```bash
+node scripts/legacy-student-import-dry-run.js --file <legacy.xlsx> --school Ohashi --write-report <report.json>
+```
+
+The importer reads local `.xlsx` files directly and can also read controlled CSV exports. It produces a dry-run report only; it does not insert production students, contacts, enrollments, charges, notes, or entitlements.
+
+Staging is backed by:
+
+```text
+legacy_student_import_batches
+legacy_student_import_rows
+```
+
+These tables retain source row number, raw source JSON, normalized candidate JSON, validation state, warnings, errors, unresolved data, duplicate candidates, and the eventual `imported_student_id`/`imported_at` audit fields. RLS is enabled and access is limited to authenticated staff who can manage the target school, plus `service_role`.
+
+Approved mapping boundaries:
+
+```text
+CustomerID -> normalized legacy_customer_id migration reference
+Active -> students.status candidate
+t -> students.first_name candidate
+Last Name -> students.last_name candidate
+Birthday -> students.date_of_birth candidate
+Age -> students.age_override only when Birthday is blank
+Mail / Gmail2 / email-like columns -> student_contacts email candidates
+携帯 / phone-like columns -> student_contacts phone candidates
+Teacher -> existing teacher profile mapping only
+lesson type -> group/private candidate when recognized
+Group Name -> class/enrollment grouping review
+Joining / Joining Date / Start Date -> students.start_date candidate only when non-conflicting
+Stop -> inactive/stopped status and enrollment end-date review
+Fee -> staged only; pricing policy required before final import
+Review asked / Review left -> staged only; do not fabricate timestamps
+Address 1 - Street / address-like columns -> staged only; enrolled-student address model required
+Japanese name columns such as NameJp and adjacent Japanese-name columns -> staged until workbook direction confirms family/given mapping
+```
+
+Owner-approved obsolete columns are intentionally ignored even when populated:
+
+```text
+Name Suffix
+To finance
+RICO Next fee
+Detail next fee
+Column2
+```
+
+Do not create Bee School Office production fields for those obsolete columns, do not include them in the unresolved report, and do not block a row because they contain data. They may remain only in `raw_source_data` inside staging/import audit rows.
+
+Final import remains blocked until the dry-run report is reviewed and any required policies are approved for Japanese name direction, enrolled-student postal addresses, legacy fee/pricing, review-state timestamps, unknown teachers, duplicate candidates, and conflicting start/joining dates.
+
 ## Student Birthdays
 
 Future Excel import work must map birthday or date-of-birth columns to:

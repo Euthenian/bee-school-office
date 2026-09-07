@@ -74,6 +74,8 @@ export default function DashboardPage() {
 
       <section className="metric-grid" aria-label="Dashboard metrics">
         <MetricCard label="Active Students" loading={state.loading} value={state.metrics?.activeStudents} />
+        <MetricCard label="Inactive Students" loading={state.loading} value={state.metrics?.inactiveStudents} />
+        <MetricCard label="Total Students" loading={state.loading} value={state.metrics?.totalStudents} />
         <MetricCard label="Schools" loading={state.loading} value={state.metrics?.schools} />
         <MetricCard label="Staff" loading={state.loading} value={state.metrics?.staff} />
       </section>

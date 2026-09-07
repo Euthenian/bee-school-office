@@ -6,7 +6,7 @@ Bee School Office student billing data is modeled separately from Payroll:
 students -> student charges -> student payments -> payment allocations -> refunds
 ```
 
-Charge means money owed. Payment means money actually received. Allocation rows connect actual payments to charges.
+Charges represent money owed. Payments represent actual money received. Allocation rows connect actual payments to charges.
 
 The current access model is super-admin only. No delegated billing role exists yet.
 
@@ -137,8 +137,10 @@ Implemented routes:
 The following are not automated yet:
 
 - Bee School pricing formulas
+- The current foundation does not define Bee School pricing.
 - automatic monthly tuition generation
 - automatic deposit refund rules
+- Deposits are represented as ordinary student charges.
 - direct bank debit processing
 - invoices
 - receipts

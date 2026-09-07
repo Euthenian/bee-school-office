@@ -78,7 +78,7 @@ import {
   getPrimaryFinanceSummary,
   normalizeFinanceSummary
 } from "../lib/finance.js";
-import { formatAgeFromDate, formatStudentAge } from "../lib/format.js";
+import { formatAgeFromDate, formatPersonName, formatStudentAge } from "../lib/format.js";
 import { formatCountBadgeValue } from "../lib/navigation-badges.js";
 import {
   canCreateStudents,
@@ -167,6 +167,7 @@ const studentBillingFoundationDoc = readFileSync(new URL("../docs/student-billin
 const expenseManagementDoc = readFileSync(new URL("../docs/expense-management-foundation.md", import.meta.url), "utf8");
 const dashboardPage = readFileSync(new URL("../app/(app)/dashboard/page.js", import.meta.url), "utf8");
 const financePage = readFileSync(new URL("../app/(app)/finance/page.js", import.meta.url), "utf8");
+const studentsPage = readFileSync(new URL("../app/(app)/students/page.js", import.meta.url), "utf8");
 const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/page.js", import.meta.url), "utf8");
 const studentEditPage = readFileSync(new URL("../app/(app)/students/edit/page.js", import.meta.url), "utf8");
 const billingPage = readFileSync(new URL("../app/(app)/billing/page.js", import.meta.url), "utf8");
@@ -322,10 +323,29 @@ test("student selects pin ambiguous PostgREST relationships", () => {
   assert.match(studentListSelect, /schools:schools!students_school_id_organization_id_fkey/);
   assert.match(studentProfileSelect, /schools:schools!students_school_id_organization_id_fkey/);
   assert.match(recentStudentsSelect, /schools:schools!students_school_id_organization_id_fkey/);
+  assert.match(studentListSelect, /legacy_customer_id/);
+  assert.match(studentListSelect, /legacy_japanese_name/);
+  assert.match(studentProfileSelect, /legacy_customer_id/);
+  assert.match(studentProfileSelect, /legacy_japanese_name/);
   assert.match(studentListSelect, /student_enrollments:student_enrollments!student_enrollments_student_id_organization_id_school_id_fkey/);
   assert.match(studentListSelect, /classes:classes!student_enrollments_class_id_organization_id_school_id_fkey/);
   assert.match(studentProfileSelect, /assigned_teacher:profiles!classes_assigned_teacher_profile_id_fkey/);
   assert.match(studentProfileSelect, /student_notes:student_notes!student_notes_student_id_organization_id_school_id_fkey/);
+});
+
+test("students list supports all, active, and inactive status filters", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+
+  assert.match(studentsPage, /studentStatusFilterOptions/);
+  assert.match(studentsPage, /value: "all", label: "All"/);
+  assert.match(studentsPage, /value: "active", label: "Active"/);
+  assert.match(studentsPage, /value: "inactive", label: "Inactive"/);
+  assert.match(studentsPage, /fetchStudents\(supabase, \{ search, status: statusFilter \}\)/);
+  assert.match(dataSource, /filters\.status && filters\.status !== "all"/);
+  assert.match(dataSource, /\.eq\("status", filters\.status\)/);
+  assert.match(dataSource, /legacy_customer_id\.ilike/);
+  assert.match(dataSource, /legacy_japanese_name\.ilike/);
+  assert.equal(formatPersonName({ legacy_japanese_name: "Legacy Japanese Name" }), "Legacy Japanese Name");
 });
 
 test("class details use controlled shared values and compact formatting", () => {
@@ -1154,6 +1174,17 @@ test("dashboard reads and displays unhealthy Gmail Trial Booking cron health onl
   assert.match(dashboardPage, /shouldShowGmailTrialBookingCronHealthAlert/);
   assert.match(dashboardPage, /Trial Booking email import may be delayed/);
   assert.match(dashboardPage, /role="alert"/);
+});
+
+test("dashboard student metrics come from persisted student status", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+
+  assert.match(dataSource, /countRows\(supabase, "students", \{ column: "status", value: "active" \}\)/);
+  assert.match(dataSource, /countRows\(supabase, "students", \{ column: "status", value: "inactive" \}\)/);
+  assert.match(dataSource, /countRows\(supabase, "students"\)/);
+  assert.match(dashboardPage, /label="Active Students"/);
+  assert.match(dashboardPage, /label="Inactive Students"/);
+  assert.match(dashboardPage, /label="Total Students"/);
 });
 
 test("pending booking review select and patch protect source metadata", () => {

@@ -80,9 +80,14 @@ function printDryRunSummary(dryRun) {
   console.log("=============================");
   console.log(`Workbook sheets: ${dryRun.workbook.sheets.map((sheet) => `${sheet.name} (${sheet.row_count})`).join(", ") || "none"}`);
   console.log(`Target school: ${summary.target_school_name}`);
-  console.log(`Source rows: ${summary.total_source_rows}`);
-  console.log(`Active students: ${summary.active_students}`);
-  console.log(`Inactive/stopped students: ${summary.inactive_or_stopped_students}`);
+  console.log(`Total student rows: ${summary.total_source_rows}`);
+  console.log(`Active = Y: ${summary.active_y_count}`);
+  console.log(`Active = N: ${summary.active_n_count}`);
+  console.log(`Blank/invalid Active values: ${summary.blank_or_invalid_active_values}`);
+  console.log(`Students eligible for import: ${summary.eligible_for_import}`);
+  console.log(`Students completely blocked: ${summary.completely_blocked}`);
+  console.log(`Students importable with warnings: ${summary.importable_with_warnings}`);
+  console.log("Status mapping written to production: Active = Y -> students.status = active; Active = N -> students.status = inactive");
   console.log(`Valid rows: ${summary.valid_rows}`);
   console.log(`Rows with warnings: ${summary.rows_with_warnings}`);
   console.log(`Rows with errors: ${summary.rows_with_errors}`);
@@ -92,6 +97,20 @@ function printDryRunSummary(dryRun) {
   console.log(`Invalid emails: ${summary.invalid_emails}`);
   console.log(`Invalid phones: ${summary.invalid_phones}`);
   console.log(`Invalid birthdays: ${summary.invalid_birthdays}`);
+
+  console.log("\nActive-column review:");
+  console.log(`- Blank Active rows: ${summary.active_column.blank_count}`);
+  if (summary.active_column.blank_rows.length) {
+    for (const row of summary.active_column.blank_rows) {
+      console.log(`  - ${row.sheet_name} row ${row.row_number}`);
+    }
+  }
+  console.log(`- Invalid Active rows: ${summary.active_column.invalid_count}`);
+  if (summary.active_column.invalid_rows.length) {
+    for (const row of summary.active_column.invalid_rows) {
+      console.log(`  - ${row.sheet_name} row ${row.row_number}: ${row.value}`);
+    }
+  }
 
   console.log("\nHeaders detected:");
   for (const sheet of dryRun.workbook.sheets) {

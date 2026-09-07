@@ -89,7 +89,7 @@ The list supports filtering by school, category, date range, payment method, sta
 
 ## Receipts
 
-Receipt upload/storage is not implemented yet.
+Receipt upload is deferred. Receipt upload/storage is not implemented yet.
 
 Only receipt metadata/reference fields exist:
 
@@ -97,7 +97,7 @@ Only receipt metadata/reference fields exist:
 - `receipt_file_path`
 - `receipt_original_name`
 
-No receipt blobs, secure file storage workflow, or OCR exists in this phase.
+The foundation does not store receipt blobs or arbitrary base64 data. No receipt blobs, secure file storage workflow, or OCR exists in this phase.
 
 ## Deferred
 

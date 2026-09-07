@@ -23,7 +23,7 @@ Approved mapping boundaries:
 
 ```text
 CustomerID -> normalized legacy_customer_id migration reference
-Active -> students.status candidate
+Active -> authoritative students.status mapping only: Y = active, N = inactive
 t -> students.first_name candidate
 Last Name -> students.last_name candidate
 Birthday -> students.date_of_birth candidate
@@ -34,7 +34,7 @@ Teacher -> existing teacher profile mapping only
 lesson type -> group/private candidate when recognized
 Group Name -> class/enrollment grouping review
 Joining / Joining Date / Start Date -> students.start_date candidate only when non-conflicting
-Stop -> inactive/stopped status and enrollment end-date review
+Stop -> staged historical stop_date only; zero effect on students.status
 Fee -> staged only; pricing policy required before final import
 Review asked / Review left -> staged only; do not fabricate timestamps
 Address 1 - Street / address-like columns -> staged only; enrolled-student address model required
@@ -53,7 +53,28 @@ Column2
 
 Do not create Bee School Office production fields for those obsolete columns, do not include them in the unresolved report, and do not block a row because they contain data. They may remain only in `raw_source_data` inside staging/import audit rows.
 
-Final import remains blocked until the dry-run report is reviewed and any required policies are approved for Japanese name direction, enrolled-student postal addresses, legacy fee/pricing, review-state timestamps, unknown teachers, duplicate candidates, and conflicting start/joining dates.
+Production import should create every safely identifiable Students-sheet row, whether active or inactive. Rows with staged-only warnings such as unresolved teachers, conflicting start/joining dates, legacy fees, addresses, review state, Japanese-name direction, partial alphabet names, or duplicate candidates remain eligible for safe general student-field import; unresolved values stay in staging for later review. A row should be completely blocked only when the student identity or required current status cannot be imported safely.
+
+The real production import runner is:
+
+```bash
+node scripts/legacy-student-import-production.js --execute
+```
+
+It is locked to `data/legacy/students-legacy.xlsm`, worksheet `Students`, unless explicit arguments are passed. The owner-approved production pass stages all 256 source rows, ignores only Students rows 2 and 129, and applies inactive status overrides only to rows 88, 195, and 219. The expected production result is 254 imported students: 63 active and 191 inactive. Production idempotency is keyed by school, source file SHA-256, sheet name, and source row number; CustomerID is preserved but is not unique because some real students share it.
+
+The production student table carries nullable legacy identity fields for this import:
+
+```text
+students.legacy_customer_id
+students.legacy_japanese_name
+students.legacy_source_file_sha256
+students.legacy_source_sheet_name
+students.legacy_source_row_number
+students.legacy_import_batch_id
+```
+
+These fields allow raw Japanese legacy names and source identity to be preserved without fabricating Japanese first/last name splits.
 
 ## Student Birthdays
 

@@ -15,13 +15,21 @@ const migrationSql = readFileSync(
   new URL("../supabase/migrations/20260902001000_legacy_student_import_staging.sql", import.meta.url),
   "utf8"
 );
+const productionIdentityMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20260902002000_legacy_student_import_identity_columns.sql", import.meta.url),
+  "utf8"
+);
+const productionImportScript = readFileSync(
+  new URL("../scripts/legacy-student-import-production.js", import.meta.url),
+  "utf8"
+);
 
 test("legacy importer ignores owner-approved obsolete columns even when populated", () => {
   const dryRun = buildLegacyStudentImportDryRun({
     workbook: workbookFromRows([
       {
         CustomerID: "B-001",
-        Active: "yes",
+        Active: "Y",
         t: "Aki",
         "Last Name": "Tanaka",
         Mail: "aki@example.com",
@@ -52,7 +60,7 @@ test("link-to-finance alias is ignored and phonetic or phone-label headers are n
     workbook: workbookFromRows([
       {
         CustomerID: "B-001",
-        Active: "yes",
+        Active: "Y",
         t: "Aki",
         "Last Name": "Tanaka",
         "Link To finance": "old finance link",
@@ -72,8 +80,8 @@ test("link-to-finance alias is ignored and phonetic or phone-label headers are n
 test("birthday takes priority over age and age is used only when birthday is blank", () => {
   const dryRun = buildLegacyStudentImportDryRun({
     workbook: workbookFromRows([
-      { CustomerID: "B-001", Active: "yes", t: "Aki", "Last Name": "Tanaka", Birthday: "2015-04-01", Age: "99" },
-      { CustomerID: "B-002", Active: "yes", t: "Ren", "Last Name": "Sato", Birthday: "", Age: "8" }
+      { CustomerID: "B-001", Active: "Y", t: "Aki", "Last Name": "Tanaka", Birthday: "2015-04-01", Age: "99" },
+      { CustomerID: "B-002", Active: "Y", t: "Ren", "Last Name": "Sato", Birthday: "", Age: "8" }
     ])
   });
 
@@ -83,12 +91,42 @@ test("birthday takes priority over age and age is used only when birthday is bla
   assert.equal(dryRun.rows[1].normalized_candidate.age_override, 8);
 });
 
+test("Active column alone controls current student status and Stop is historical only", () => {
+  const dryRun = buildLegacyStudentImportDryRun({
+    workbook: workbookFromRows([
+      { CustomerID: "B-001", Active: "Y", t: "Aki", "Last Name": "Tanaka", Stop: "2024-04-01" },
+      { CustomerID: "B-002", Active: "N", t: "Ren", "Last Name": "Sato" },
+      { CustomerID: "B-003", Active: "", t: "Kai", "Last Name": "Ito" },
+      { CustomerID: "B-004", Active: "Maybe", t: "Mio", "Last Name": "Kato" }
+    ])
+  });
+
+  assert.equal(dryRun.summary.total_source_rows, 4);
+  assert.equal(dryRun.summary.active_y_count, 1);
+  assert.equal(dryRun.summary.active_n_count, 1);
+  assert.equal(dryRun.summary.blank_or_invalid_active_values, 2);
+  assert.equal(dryRun.summary.active_column.blank_count, 1);
+  assert.equal(dryRun.summary.active_column.invalid_count, 1);
+  assert.deepEqual(dryRun.summary.status_mapping_to_production, {
+    "Active = Y": "students.status = active",
+    "Active = N": "students.status = inactive"
+  });
+  assert.equal(dryRun.rows[0].normalized_candidate.status, "active");
+  assert.equal(dryRun.rows[0].normalized_candidate.stop_date, "2024-04-01");
+  assert.equal(dryRun.rows[0].normalized_candidate.status_source.mapping, "Y -> active");
+  assert.equal(dryRun.rows[1].normalized_candidate.status, "inactive");
+  assert.equal(dryRun.rows[2].normalized_candidate.status, null);
+  assert.equal(dryRun.rows[3].normalized_candidate.status, null);
+  assert.equal(dryRun.summary.eligible_for_import, 2);
+  assert.equal(dryRun.summary.completely_blocked, 2);
+});
+
 test("conflicting dates, bad contacts, and unknown teachers are surfaced for review", () => {
   const dryRun = buildLegacyStudentImportDryRun({
     workbook: workbookFromRows([
       {
         CustomerID: "B-001",
-        Active: "yes",
+        Active: "Y",
         t: "Aki",
         "Last Name": "Tanaka",
         Joining: "2024-04-01",
@@ -102,21 +140,40 @@ test("conflicting dates, bad contacts, and unknown teachers are surfaced for rev
   });
   const row = dryRun.rows[0];
 
-  assert.equal(row.validation_state, "error");
-  assert.equal(row.errors.some((error) => error.code === "conflicting_start_dates"), true);
-  assert.equal(row.errors.some((error) => error.code === "invalid_email"), true);
+  assert.equal(row.validation_state, "warning");
+  assert.equal(row.warnings.some((warning) => warning.code === "conflicting_start_dates"), true);
+  assert.equal(row.warnings.some((warning) => warning.code === "invalid_email"), true);
   assert.equal(row.warnings.some((warning) => warning.code === "invalid_phone"), true);
   assert.equal(row.unresolved.some((item) => item.code === "unknown_teacher" && item.value === "Legacy Teacher"), true);
+  assert.equal(row.import_eligibility.eligible, true);
+  assert.equal(row.import_eligibility.status, "importable_with_warnings");
   assert.equal(dryRun.summary.conflicting_start_joining_dates, 1);
   assert.equal(dryRun.summary.invalid_emails, 1);
   assert.equal(dryRun.summary.invalid_phones, 1);
 });
 
-test("teacher mappings must point to existing profile ids and duplicate candidates are reported", () => {
+test("partial alphabet names remain importable when another usable identity signal is present", () => {
   const dryRun = buildLegacyStudentImportDryRun({
     workbook: workbookFromRows([
-      { CustomerID: "B-001", Active: "yes", t: "Aki", "Last Name": "Tanaka", Mail: "aki@example.com", Teacher: "Mika" },
-      { CustomerID: "B-001", Active: "yes", t: "Aki", "Last Name": "Tanaka", Mail: "aki@example.com", Teacher: "Mika" }
+      { CustomerID: "B-001", Active: "N", t: "Kanrin", "Last Name": "", NameJp: "チュオン ティ スアン" },
+      { CustomerID: "B-002", Active: "N", t: "Yamakawa", "Last Name": "" },
+      { CustomerID: "B-003", Active: "N", t: "helper@example.com", "Last Name": "", NameJp: "" }
+    ])
+  });
+
+  assert.equal(dryRun.summary.eligible_for_import, 2);
+  assert.equal(dryRun.summary.completely_blocked, 1);
+  assert.equal(dryRun.rows[0].import_eligibility.eligible, true);
+  assert.equal(dryRun.rows[1].import_eligibility.eligible, true);
+  assert.equal(dryRun.rows[2].import_eligibility.eligible, false);
+  assert.equal(dryRun.rows[2].normalized_candidate.import_blockers.includes("missing_usable_identity"), true);
+});
+
+test("teacher mappings must point to existing profile ids and duplicate candidates are reported as warnings", () => {
+  const dryRun = buildLegacyStudentImportDryRun({
+    workbook: workbookFromRows([
+      { CustomerID: "B-001", Active: "Y", t: "Aki", "Last Name": "Tanaka", Mail: "aki@example.com", Teacher: "Mika" },
+      { CustomerID: "B-001", Active: "Y", t: "Aki", "Last Name": "Tanaka", Mail: "aki@example.com", Teacher: "Mika" }
     ]),
     teacherMappings: { Mika: { profile_id: "11111111-1111-4111-8111-111111111111" } },
     existingStudents: [
@@ -133,6 +190,9 @@ test("teacher mappings must point to existing profile ids and duplicate candidat
   assert.equal(dryRun.rows[0].normalized_candidate.teacher.profile_id, "11111111-1111-4111-8111-111111111111");
   assert.equal(dryRun.summary.duplicate_candidates, 2);
   assert.equal(dryRun.rows.every((row) => row.duplicate_candidates.length > 0), true);
+  assert.equal(dryRun.rows.every((row) => row.import_eligibility.eligible), true);
+  assert.equal(dryRun.rows.every((row) => row.warnings.some((warning) => warning.code === "duplicate_candidate")), true);
+  assert.equal(dryRun.rows.every((row) => row.normalized_candidate.import_blockers.length === 0), true);
 });
 
 test("fee, address, review state, and Japanese names are staged without production writes", () => {
@@ -140,7 +200,7 @@ test("fee, address, review state, and Japanese names are staged without producti
     workbook: workbookFromRows([
       {
         CustomerID: "B-001",
-        Active: "yes",
+        Active: "Y",
         t: "Aki",
         "Last Name": "Tanaka",
         NameJp: "\u7530\u4e2d",
@@ -158,12 +218,9 @@ test("fee, address, review state, and Japanese names are staged without producti
   assert.equal(candidate.address.import_action, "staged_only_model_required");
   assert.equal(candidate.review.import_action, "staged_only_policy_required");
   assert.equal(candidate.japanese_name.import_action, "staged_only_direction_required");
-  assert.deepEqual(candidate.import_blockers, [
-    "address_model_required",
-    "student_pricing_policy_required",
-    "review_state_policy_required",
-    "japanese_name_mapping_required"
-  ]);
+  assert.deepEqual(candidate.import_blockers, []);
+  assert.equal(dryRun.rows[0].import_eligibility.eligible, true);
+  assert.equal(dryRun.rows[0].import_eligibility.status, "importable_with_warnings");
 });
 
 test("direct xlsx parsing reads workbook sheets, headers, and rows from a local path", () => {
@@ -176,7 +233,7 @@ test("direct xlsx parsing reads workbook sheets, headers, and rows from a local 
       "xl/_rels/workbook.xml.rels": workbookRelationshipsXml(),
       "xl/worksheets/sheet1.xml": worksheetXml([
         ["CustomerID", "Active", "t", "Last Name", "Birthday", "Mail"],
-        ["B-001", "yes", "Aki", "Tanaka", "2015-04-01", "aki@example.com"]
+        ["B-001", "Y", "Aki", "Tanaka", "2015-04-01", "aki@example.com"]
       ])
     })
   );
@@ -230,6 +287,39 @@ test("legacy import staging migration is admin-scoped and keeps obsolete fields 
   for (const column of IGNORED_LEGACY_COLUMNS) {
     assert.doesNotMatch(migrationSql, new RegExp(`\\b${column.replace(/\s+/g, "_")}\\b`, "i"));
   }
+});
+
+test("legacy production identity migration preserves source identity without fabricating name splits", () => {
+  assert.match(productionIdentityMigrationSql, /add column if not exists legacy_customer_id text/);
+  assert.match(productionIdentityMigrationSql, /add column if not exists legacy_japanese_name text/);
+  assert.match(productionIdentityMigrationSql, /add column if not exists legacy_source_file_sha256 text/);
+  assert.match(productionIdentityMigrationSql, /alter column first_name drop not null/);
+  assert.match(productionIdentityMigrationSql, /alter column last_name drop not null/);
+  assert.match(productionIdentityMigrationSql, /students_usable_identity_check/);
+  assert.match(productionIdentityMigrationSql, /legacy_japanese_name/);
+  assert.match(productionIdentityMigrationSql, /students_legacy_source_position_uidx/);
+  assert.doesNotMatch(productionIdentityMigrationSql, /unique .*legacy_customer_id/i);
+});
+
+test("legacy production importer applies owner decisions and remains source-row idempotent", () => {
+  assert.match(productionImportScript, /const DEFAULT_FILE = "data\/legacy\/students-legacy\.xlsm"/);
+  assert.match(productionImportScript, /const DEFAULT_SHEET = "Students"/);
+  assert.match(productionImportScript, /const EXPECTED_IMPORTED_COUNT = 254/);
+  assert.match(productionImportScript, /const OWNER_IGNORED_ROWS = new Set\(\[2, 129\]\)/);
+  assert.match(productionImportScript, /\[88, "inactive"\]/);
+  assert.match(productionImportScript, /\[195, "inactive"\]/);
+  assert.match(productionImportScript, /\[219, "inactive"\]/);
+  assert.match(productionImportScript, /--test-connection/);
+  assert.match(productionImportScript, /process\.env\.SUPABASE_DB_PASSWORD \|\| ""/);
+  assert.match(productionImportScript, /readOptionalText\("supabase\/\.temp\/project-ref"\)/);
+  assert.match(productionImportScript, /const expectedUsername = `postgres\.\$\{projectRef\}`/);
+  assert.match(productionImportScript, /isSupabaseSharedPooler/);
+  assert.match(productionImportScript, /legacy_source_file_sha256/);
+  assert.match(productionImportScript, /legacy_source_sheet_name/);
+  assert.match(productionImportScript, /legacy_source_row_number/);
+  assert.match(productionImportScript, /on conflict \(\s*school_id,\s*legacy_source_file_sha256,\s*legacy_source_sheet_name,\s*legacy_source_row_number\s*\)/);
+  assert.doesNotMatch(productionImportScript, /p_date_of_birth/);
+  assert.doesNotMatch(productionImportScript, /student_enrollments/);
 });
 
 function workbookFromRows(rows) {

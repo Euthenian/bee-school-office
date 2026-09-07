@@ -19,9 +19,16 @@ import { fetchStudents, sendAiEigoStudentInvitation } from "@/lib/data";
 import { canCreateStudents, canManageAiEigoInvitations } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
+const studentStatusFilterOptions = [
+  { value: "all", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" }
+];
+
 export default function StudentsPage() {
   const { profile, session } = useAuth();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [state, setState] = useState({ loading: true, error: "", students: [] });
   const [notice, setNotice] = useState("");
   const [aiEigoActionStudentId, setAiEigoActionStudentId] = useState("");
@@ -37,7 +44,7 @@ export default function StudentsPage() {
       }
 
       setState((current) => ({ ...current, loading: true }));
-      const { data, error } = await fetchStudents(supabase, search);
+      const { data, error } = await fetchStudents(supabase, { search, status: statusFilter });
       if (!active) return;
 
       setState({
@@ -51,7 +58,7 @@ export default function StudentsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [search, session]);
+  }, [search, session, statusFilter]);
 
   async function handleSendAiEigoInvitation(student) {
     const supabase = getSupabaseBrowserClient();
@@ -100,10 +107,20 @@ export default function StudentsPage() {
           <span>Search students</span>
           <input
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Name, preferred name, or status"
+            placeholder="Name or preferred name"
             type="search"
             value={search}
           />
+        </label>
+        <label className="search-field">
+          <span>Status</span>
+          <select onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
+            {studentStatusFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
 

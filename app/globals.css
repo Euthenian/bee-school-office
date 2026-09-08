@@ -509,6 +509,10 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+.settings-password-actions {
+  padding: 0 18px 18px;
+}
+
 .contact-editor {
   display: grid;
   gap: 18px;

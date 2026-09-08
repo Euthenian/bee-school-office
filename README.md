@@ -44,6 +44,21 @@ Implemented foundations include:
 
 Do not place service-role keys in this repository or in browser-visible environment variables.
 
+## Supabase Auth URL Configuration
+
+Production Supabase Auth settings must include:
+
+```text
+Site URL: https://office.beeschool.jp
+Allowed redirect URL: https://office.beeschool.jp/**
+```
+
+Password recovery links should redirect to:
+
+```text
+https://office.beeschool.jp/reset-password/
+```
+
 ## Scripts
 
 - `npm run dev`: start the local Next.js dev server.

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { SetupNotice } from "@/components/SetupNotice";
 import { useAuth } from "@/components/AuthProvider";
+import { getPasswordResetRedirectUrl } from "@/lib/auth-redirects";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -12,8 +13,10 @@ export default function LoginPage() {
   const { configured, loading, session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [resetMode, setResetMode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     if (!loading && session) {
@@ -24,6 +27,7 @@ export default function LoginPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
+    setSuccess("");
     setSubmitting(true);
 
     const supabase = getSupabaseBrowserClient();
@@ -47,6 +51,33 @@ export default function LoginPage() {
     router.replace("/dashboard/");
   }
 
+  async function handleResetRequest(event) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setSubmitting(true);
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setError("Supabase public environment variables are not configured.");
+      setSubmitting(false);
+      return;
+    }
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: getPasswordResetRedirectUrl()
+    });
+
+    if (resetError) {
+      setError(resetError.message);
+      setSubmitting(false);
+      return;
+    }
+
+    setSuccess("If this email has an account, a password reset link has been sent.");
+    setSubmitting(false);
+  }
+
   if (loading) {
     return <LoadingScreen label="Checking session" />;
   }
@@ -66,6 +97,36 @@ export default function LoginPage() {
 
         {!configured ? (
           <SetupNotice />
+        ) : resetMode ? (
+          <form className="auth-form" onSubmit={handleResetRequest}>
+            <label>
+              Email
+              <input
+                autoComplete="email"
+                name="email"
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                type="email"
+                value={email}
+              />
+            </label>
+            {error ? <p className="form-error">{error}</p> : null}
+            {success ? <p className="inline-success">{success}</p> : null}
+            <button className="primary-button" disabled={submitting} type="submit">
+              {submitting ? "Sending..." : "Send reset link"}
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setResetMode(false);
+                setError("");
+                setSuccess("");
+              }}
+              type="button"
+            >
+              Back to sign in
+            </button>
+          </form>
         ) : (
           <form className="auth-form" onSubmit={handleSubmit}>
             <label>
@@ -91,8 +152,20 @@ export default function LoginPage() {
               />
             </label>
             {error ? <p className="form-error">{error}</p> : null}
+            {success ? <p className="inline-success">{success}</p> : null}
             <button className="primary-button" disabled={submitting} type="submit">
               {submitting ? "Signing in..." : "Sign in"}
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setResetMode(true);
+                setError("");
+                setSuccess("");
+              }}
+              type="button"
+            >
+              Forgot password?
             </button>
           </form>
         )}

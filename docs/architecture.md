@@ -196,6 +196,18 @@ Implemented authenticated routes:
 Public/auth routes:
 
 - `/login/`
+- `/reset-password/`
+
+## Supabase Auth URL Configuration
+
+Production Supabase Auth must be configured with:
+
+```text
+Site URL: https://office.beeschool.jp
+Allowed redirect URL: https://office.beeschool.jp/**
+```
+
+Password recovery email redirects should target `https://office.beeschool.jp/reset-password/`. Browser-initiated local development recovery emails use the current Bee School Office origin plus `/reset-password/` so localhost links do not point at another application.
 
 ## Implemented
 

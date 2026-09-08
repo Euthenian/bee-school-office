@@ -25,3 +25,8 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 !.vscode/extensions.json
+
+# Version only the owner-approved Taiken reports in this private repository
+data/legacy/taiken-audit/*
+!data/legacy/taiken-audit/taiken-dry-run.md
+!data/legacy/taiken-audit/taiken-dry-run.json

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   buildLegacyTaikenDryRun,
@@ -11,6 +12,19 @@ import {
   parseTaikenTime,
   taikenSourceIdentity
 } from "../lib/legacy-taiken-imports.js";
+
+const taikenStagingMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20260908001000_legacy_taiken_import_staging.sql", import.meta.url),
+  "utf8"
+);
+const taikenCompatibilityMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20260908002000_legacy_taiken_import_compatibility.sql", import.meta.url),
+  "utf8"
+);
+const taikenProductionImportScript = readFileSync(
+  new URL("../scripts/legacy-taiken-import-production.js", import.meta.url),
+  "utf8"
+);
 
 const target = { organization_id: "organization-ohashi", school_id: "school-ohashi" };
 const student = (id, options = {}) => ({
@@ -195,9 +209,27 @@ test("audit preserves all genuine CRM rows including side legends, nameless cont
   assert.equal(report.summary.total_taiken_data_rows, 3);
   assert.equal(report.summary.genuine_data_rows, 2);
   assert.equal(report.summary.excluded_legend_rows, 1);
+  assert.equal(report.summary.production_importable_rows, 2);
+  assert.equal(report.summary.completely_blocked_rows, 0);
   assert.equal(report.rows[0].normalized_candidate.trial_lesson.status, "did_not_join");
   assert.equal(report.rows[0].chosen_converted_student_id, null);
   assert.equal(report.rows[1].source_row_number, 3);
+});
+
+test("historical preservation blockers are distinct from current production schema gaps", () => {
+  const report = audit([{ Name: "", mail: "family@example.com", notes: "asked about a trial" }]);
+  const row = report.rows[0];
+  assert.equal(row.normalized_candidate.import_blockers.length, 0);
+  assert.deepEqual(row.normalized_candidate.current_production_schema_gaps.sort(), [
+    "prospects.japanese_name",
+    "trial_lessons.lesson_type",
+    "trial_lessons.level_id",
+    "trial_lessons.status",
+    "trial_lessons.trial_date",
+    "trial_lessons.trial_time"
+  ].sort());
+  assert.equal(report.summary.production_importable_rows, 1);
+  assert.equal(report.summary.rows_with_current_production_schema_gaps, 1);
 });
 
 test("audit is read-only, leaves Student inputs intact, and keeps addresses exclusively in raw staging", () => {
@@ -244,6 +276,7 @@ test("conflicting Joined fields and date-only Joined evidence never populate con
   ]);
   for (const row of report.rows) assert.equal(row.chosen_converted_student_id, null);
   assert.equal(report.rows[0].normalized_candidate.trial_lesson.status, null);
+  assert.equal(report.rows[1].normalized_candidate.trial_lesson.status, null);
   assert.equal(report.rows[1].normalized_candidate.status_evidence.confirmed_joined, false);
   assert.equal(report.rows[2].normalized_candidate.trial_lesson.status, null);
   assert.equal(interpretTaikenStatus({ Joined: "n" }).status, "did_not_join");
@@ -273,7 +306,7 @@ test("duplicate source candidates are reported while every historical source row
   assert.equal(report.rows[0].duplicate_candidates[0].source_row_number, 3);
 });
 
-test("multiple names written inside S1 create separate source fragments while household conversion stays blocked", () => {
+test("multiple names written inside S1 create separate source fragments while household conversion needs review", () => {
   const snapshot = databaseSnapshot({ students: [student("masami", { first_name: "Masami", last_name: "", legacy_japanese_name: "" })] });
   const report = audit([{ ...completeRow, "name of student 1": "Masami and Fumiyo" }], { snapshot });
   const row = report.rows[0];
@@ -282,7 +315,8 @@ test("multiple names written inside S1 create separate source fragments while ho
   assert.equal(row.chosen_converted_student_id, null);
   assert.equal(row.normalized_candidate.participants.every((participant) => participant.converted_student_id === null), true);
   assert.equal(row.normalized_candidate.participants.every((participant) => participant.age_group_level_id === null), true);
-  assert.equal(row.normalized_candidate.import_blockers.includes("participant_household_needs_review"), true);
+  assert.equal(row.normalized_candidate.import_blockers.length, 0);
+  assert.equal(row.warnings.some((warning) => warning.code === "multiple_participants_require_identity_review"), true);
 });
 
 test("ambiguous shared surname fragments remain verbatim and are never expanded into invented names", () => {
@@ -290,7 +324,8 @@ test("ambiguous shared surname fragments remain verbatim and are never expanded 
   const row = report.rows[0];
   assert.deepEqual(row.normalized_candidate.participants.map((participant) => participant.alphabet_name), ["Taiga Uta", "Asa"]);
   assert.equal(row.warnings.some((warning) => warning.code === "participant_name_may_be_incomplete"), true);
-  assert.equal(row.normalized_candidate.import_blockers.includes("participant_household_needs_review"), true);
+  assert.equal(row.normalized_candidate.import_blockers.length, 0);
+  assert.equal(row.warnings.some((warning) => warning.code === "multiple_participants_require_identity_review"), true);
 });
 
 test("relationship-only participant descriptions remain staged without fabricating participant identities", () => {
@@ -299,5 +334,56 @@ test("relationship-only participant descriptions remain staged without fabricati
   assert.equal(row.normalized_candidate.participants.length, 0);
   assert.equal(row.raw_source_data["name of student 1"], "Mom and daughter");
   assert.equal(row.chosen_converted_student_id, null);
-  assert.equal(row.normalized_candidate.import_blockers.includes("participant_household_needs_review"), true);
+  assert.equal(row.normalized_candidate.import_blockers.length, 0);
+  assert.equal(row.warnings.some((warning) => warning.code === "multiple_participants_require_identity_review"), true);
+});
+
+test("Taiken staging migration preserves tenant RLS and source-row idempotency", () => {
+  assert.match(taikenStagingMigrationSql, /add column if not exists import_kind text not null default 'students'/);
+  assert.match(taikenStagingMigrationSql, /legacy_import_batches_taiken_source_uidx/);
+  assert.match(taikenStagingMigrationSql, /legacy_import_rows_taiken_source_identity_uidx/);
+  assert.match(taikenStagingMigrationSql, /school_id, source_file_sha256, source_sheet_name, source_row_number/);
+  assert.match(taikenStagingMigrationSql, /legacy_import_rows_taiken_never_creates_student_check/);
+  assert.match(taikenStagingMigrationSql, /imported_student_id is null/);
+  assert.match(taikenStagingMigrationSql, /chosen_converted_student_id is null or student_match_category = 'A'/);
+  assert.match(taikenStagingMigrationSql, /protect_legacy_taiken_import_receipt/);
+  assert.doesNotMatch(taikenStagingMigrationSql, /disable row level security/i);
+});
+
+test("Taiken compatibility migration relaxes only historical storage nullability", () => {
+  assert.match(taikenCompatibilityMigrationSql, /alter table public\.prospects\s+alter column japanese_name drop not null/);
+  for (const column of ["trial_date", "trial_time", "lesson_type", "level_id", "status"]) {
+    assert.match(taikenCompatibilityMigrationSql, new RegExp(`alter column ${column} drop not null`));
+  }
+  assert.match(taikenCompatibilityMigrationSql, /Live creation remains validated by public\.create_trial_lesson_mvp/);
+  assert.match(taikenCompatibilityMigrationSql, /notify pgrst, 'reload schema'/);
+  assert.doesNotMatch(taikenCompatibilityMigrationSql, /drop policy|disable row level security|grant all/i);
+});
+
+test("Taiken production importer pins owner-approved production policy", () => {
+  assert.match(taikenProductionImportScript, /const EXPECTED_ROWS = 108/);
+  assert.match(taikenProductionImportScript, /const EXPECTED_INVALID_OPTIONAL_PHONES = 10/);
+  assert.match(taikenProductionImportScript, /const EXPECTED_INVALID_EMAILS = 0/);
+  assert.match(taikenProductionImportScript, /const EXPECTED_STATUS_COUNTS = \{ joined: 15, unresolved: 87, cancelled: 2, did_not_join: 4 \}/);
+  assert.match(taikenProductionImportScript, /const JOINED_ROWS = new Set\(\[2, 3, 12, 27, 28, 32, 49, 53, 57, 58, 59, 60, 61, 87, 94\]\)/);
+  assert.match(taikenProductionImportScript, /const CANCELLED_ROWS = new Set\(\[7, 8\]\)/);
+  assert.match(taikenProductionImportScript, /const DID_NOT_JOIN_ROWS = new Set\(\[30, 37, 48, 54\]\)/);
+  for (const uuid of [
+    "6a179773-55ff-4ff4-8753-9f61bef9ff3e",
+    "c4a25321-1cb3-4ab4-8bd2-b769b35e85ff",
+    "392ea0a0-1674-4d74-afa3-83670bc37c3b",
+    "2d812ef4-85b6-45ca-8e74-4facaaf70419",
+    "2bc43681-d960-42f9-82d8-8b6d65c6742f"
+  ]) {
+    assert.match(taikenProductionImportScript, new RegExp(uuid));
+  }
+  assert.match(taikenProductionImportScript, /participants = \(row\.normalized_candidate\.participants \|\| \[\]\)\s+\.map\(\(participant\) => \(\{ \.\.\.participant, converted_student_id: null \}\)\)/);
+  assert.match(taikenProductionImportScript, /normalized production candidates contain raw address values/);
+  assert.match(taikenProductionImportScript, /on conflict \(school_id, source_file_sha256, source_sheet_name, source_row_number\)/);
+  assert.match(taikenProductionImportScript, /where import_kind = 'taiken'/);
+  assert.match(taikenProductionImportScript, /for update/);
+  assert.match(taikenProductionImportScript, /second idempotency pass created/);
+  assert.match(taikenProductionImportScript, /rls_trial_lessons_readable/);
+  assert.doesNotMatch(taikenProductionImportScript, /insert into public\.students/i);
+  assert.doesNotMatch(taikenProductionImportScript, /student_enrollments/i);
 });

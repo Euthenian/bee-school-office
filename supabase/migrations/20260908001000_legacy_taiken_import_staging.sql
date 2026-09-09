@@ -6,6 +6,12 @@ alter table public.legacy_student_import_batches
   add column if not exists import_kind text not null default 'students';
 
 alter table public.legacy_student_import_batches
+  drop constraint if exists legacy_import_batches_kind_check,
+  drop constraint if exists legacy_import_batches_taiken_source_check,
+  drop constraint if exists legacy_import_batches_id_kind_key,
+  drop constraint if exists legacy_import_batches_id_hash_key;
+
+alter table public.legacy_student_import_batches
   add constraint legacy_import_batches_kind_check
     check (import_kind in ('students', 'taiken')),
   add constraint legacy_import_batches_taiken_source_check
@@ -19,6 +25,12 @@ alter table public.legacy_student_import_batches
   add constraint legacy_import_batches_id_kind_key unique (id, import_kind),
   add constraint legacy_import_batches_id_hash_key unique (id, source_file_sha256);
 
+create unique index if not exists legacy_import_batches_taiken_source_uidx
+on public.legacy_student_import_batches (
+  school_id, import_kind, source_file_sha256, source_sheet_names
+)
+where import_kind = 'taiken';
+
 alter table public.legacy_student_import_rows
   add column if not exists import_kind text not null default 'students',
   add column if not exists source_file_sha256 text,
@@ -28,6 +40,24 @@ alter table public.legacy_student_import_rows
   add column if not exists imported_trial_lesson_id uuid,
   add column if not exists imported_prospect_id uuid,
   add column if not exists import_status text not null default 'dry_run';
+
+alter table public.legacy_student_import_rows
+  drop constraint if exists legacy_import_rows_kind_check,
+  drop constraint if exists legacy_import_rows_batch_kind_fkey,
+  drop constraint if exists legacy_import_rows_batch_hash_fkey,
+  drop constraint if exists legacy_import_rows_source_hash_check,
+  drop constraint if exists legacy_import_rows_taiken_source_check,
+  drop constraint if exists legacy_import_rows_student_match_candidates_check,
+  drop constraint if exists legacy_import_rows_student_match_category_check,
+  drop constraint if exists legacy_import_rows_chosen_match_check,
+  drop constraint if exists legacy_import_rows_chosen_student_scope_fkey,
+  drop constraint if exists legacy_import_rows_trial_scope_fkey,
+  drop constraint if exists legacy_import_rows_prospect_scope_fkey,
+  drop constraint if exists legacy_import_rows_trial_prospect_pair_check,
+  drop constraint if exists legacy_import_rows_taiken_never_creates_student_check,
+  drop constraint if exists legacy_import_rows_trial_fields_kind_check,
+  drop constraint if exists legacy_import_rows_import_status_check,
+  drop constraint if exists legacy_import_rows_taiken_import_receipt_check;
 
 alter table public.legacy_student_import_rows
   add constraint legacy_import_rows_kind_check
@@ -94,17 +124,17 @@ alter table public.legacy_student_import_rows
 -- Unlike the old per-batch key, this reserves a source row across every retry/batch.
 -- A future approved executor must lock this row and create the prospect, trial,
 -- participants and receipt in ONE transaction. A dry run never executes that path.
-create unique index legacy_import_rows_taiken_source_identity_uidx
+create unique index if not exists legacy_import_rows_taiken_source_identity_uidx
 on public.legacy_student_import_rows (
   school_id, source_file_sha256, source_sheet_name, source_row_number
 )
 where import_kind = 'taiken';
 
-create unique index legacy_import_rows_taiken_trial_receipt_uidx
+create unique index if not exists legacy_import_rows_taiken_trial_receipt_uidx
 on public.legacy_student_import_rows (imported_trial_lesson_id)
 where imported_trial_lesson_id is not null;
 
-create index legacy_import_rows_taiken_review_idx
+create index if not exists legacy_import_rows_taiken_review_idx
 on public.legacy_student_import_rows (school_id, import_status, student_match_category, source_row_number)
 where import_kind = 'taiken';
 
@@ -164,6 +194,7 @@ $$;
 
 revoke all on function public.protect_legacy_taiken_import_receipt() from public, anon, authenticated;
 
+drop trigger if exists legacy_import_rows_protect_taiken_receipt on public.legacy_student_import_rows;
 create trigger legacy_import_rows_protect_taiken_receipt
 before insert or update or delete on public.legacy_student_import_rows
 for each row execute function public.protect_legacy_taiken_import_receipt();

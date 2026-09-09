@@ -51,7 +51,7 @@ function renderReport(report) {
       ]))
     ]),
     "## Status interpretation and Student correlations",
-    "Explicit yes/Yes proposes Joined, unless another Joined column or refusal date conflicts. Explicit no/n proposes Did not join. Refusal dates preserve non-conversion evidence. Date-only Joined cells are review candidates, not confirmed conversions. Exact cancellation phrases propose Cancelled. Blank outcomes remain unresolved; dates alone never establish attendance.",
+    "Explicit yes/Yes proposes Joined, unless another Joined column or refusal date conflicts. Explicit no/n proposes Did not join. Refusal dates preserve non-conversion evidence. Date-only Joined cells are owner-review candidates and do not write joined status. Exact cancellation phrases propose Cancelled. Blank outcomes remain unresolved; dates alone never establish attendance.",
     table(["Proposed status", "Rows"], Object.entries(summary.proposed_status_counts)),
     ...report.status_student_correlations.flatMap((entry) => [
       `### ${entry.column} versus current Student matches`,
@@ -62,7 +62,7 @@ function renderReport(report) {
     report.proposed_student_matches.length ? table(["Source row", "Existing Student UUID", "Converted UUID to write", "Evidence", "Student profile"],
       report.proposed_student_matches.map((match) => [match.source_row_number, match.student_id, match.converted_student_id || "(withheld: conversion unresolved)", match.signals.map((signal) => signal.signals.join(" + ")).join("; "), match.profile_path]))
       : "No automatic Student UUID links are proposed.",
-    "### Every Joined candidate requiring review",
+    "### Every conversion candidate requiring review or link confirmation",
     table(["Row", "Joined", "Joined2", "Category", "Candidate UUIDs and signals", "Outcome evidence"],
       report.rows.filter((row) => row.normalized_candidate.status_evidence.joined_candidate).map((row) => [
         row.source_row_number, rawLabel(row.raw_source_data.Joined), rawLabel(row.raw_source_data.Joined2), row.student_match_category,
@@ -81,8 +81,15 @@ function renderReport(report) {
     "## Production fields proposed",
     table(["Source", "Existing production target", "Rule"], report.production_field_mapping.map((entry) => [entry.source, entry.target, entry.rule])),
     "All prospective rows include organization_id and school_id. A future approved transaction would generate IDs and attach prospect_contacts.prospect_id, trial_lessons.prospect_id and trial_lesson_participants.trial_lesson_id. Each row's exact candidate values are in the companion JSON. Postal adress/address remains only in raw_source_data; no Student/Auth writes are proposed.",
-    "## Required-field and business-review blockers",
-    table(["Blocker", "Rows"], Object.entries(summary.import_blocker_counts)),
+    "## Remaining complete import blockers",
+    Object.keys(summary.import_blocker_counts).length
+      ? table(["Blocker", "Rows"], Object.entries(summary.import_blocker_counts))
+      : "None. Every genuine Taiken row has enough identity or history to preserve as a historical record.",
+    "## Current production schema gaps, not import blockers",
+    "These fields are still NOT NULL in the current production schema or otherwise required by the existing production write path. They require an approved schema/import-path adjustment before a real import; the dry run does not fabricate values.",
+    report.current_production_schema_gaps.length
+      ? table(["Schema field", "Count", "Source rows"], report.current_production_schema_gaps.map((entry) => [entry.name, entry.count, entry.source_rows.join(", ")]))
+      : "None.",
     ...report.unresolved_business_meanings.map((meaning) => `- ${meaning}`),
     "## Row-by-row audit",
     table(["Source row", "Date", "Time", "Status", "Participants", "Match category", "Chosen Student UUID", "Warnings / blockers"],

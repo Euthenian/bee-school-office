@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint . --max-warnings=0",
-    "test": "node tests/roles.test.js && node tests/trial-booking-imports.test.js && node tests/legacy-student-imports.test.js && node tests/gmail-trial-booking-worker.test.js && node tests/gmail-trial-booking-cron-alerts.test.js && node tests/communications.test.js && node tests/trial-lessons-delete.test.js && node tests/student-questions.test.js && node tests/ai-eigo-invitations.test.js && node tests/legacy-taiken-workbook.test.js && node tests/legacy-taiken-imports.test.js && node tests/legacy-taiken-snapshot.test.js",
+    "test": "node tests/roles.test.js && node tests/trial-booking-imports.test.js && node tests/legacy-student-imports.test.js && node tests/gmail-trial-booking-worker.test.js && node tests/gmail-trial-booking-cron-alerts.test.js && node tests/communications.test.js && node tests/trial-lessons-delete.test.js && node tests/trial-lessons-filters.test.js && node tests/student-questions.test.js && node tests/ai-eigo-invitations.test.js && node tests/legacy-taiken-workbook.test.js && node tests/legacy-taiken-imports.test.js && node tests/legacy-taiken-snapshot.test.js",
     "gmail:reauthorize": "node scripts/gmail-reauthorize.js",
     "taiken:dry-run": "node scripts/legacy-taiken-import-dry-run.js",
     "taiken:import-production": "node scripts/legacy-taiken-import-production.js"

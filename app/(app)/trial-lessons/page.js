@@ -27,12 +27,21 @@ import {
 } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
+  buildTrialLessonColumnFilterOptions,
+  defaultTrialLessonColumnFilters,
+  defaultTrialLessonSort,
+  filterAndSortTrialLessons,
   formatParticipantAgeGroup,
   formatParticipantName,
   formatProspectName,
   formatTrialLevel,
+  getLocalDateKey,
   getPrimaryParticipant,
+  hasActiveTrialLessonColumnFilters,
+  hasActiveTrialLessonSort,
   removeTrialLessonById,
+  resetTrialLessonTableFilters,
+  trialLessonDateFilterPresets,
   trialLessonStatuses
 } from "@/lib/trial-lessons";
 import { canManageTrialLessons } from "@/lib/roles";
@@ -58,6 +67,8 @@ export default function TrialLessonsPage() {
   const [deletingId, setDeletingId] = useState("");
   const [phoneFollowUpId, setPhoneFollowUpId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [columnFilters, setColumnFilters] = useState(defaultTrialLessonColumnFilters);
+  const [tableSort, setTableSort] = useState(defaultTrialLessonSort);
   const mayManage = canManageTrialLessons(profile);
 
   useEffect(() => {
@@ -155,6 +166,37 @@ export default function TrialLessonsPage() {
   }, [mayManage, refreshKey, search, schoolFilter, session, statusFilter, teacherFilter]);
 
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
+  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const columnFilterOptions = useMemo(
+    () => buildTrialLessonColumnFilterOptions(state.trialLessons),
+    [state.trialLessons]
+  );
+  const visibleTrialLessons = useMemo(
+    () => filterAndSortTrialLessons(state.trialLessons, { columnFilters, sort: tableSort, today: todayKey }),
+    [columnFilters, state.trialLessons, tableSort, todayKey]
+  );
+  const hasAnyFilters =
+    Boolean(search.trim() || statusFilter !== "all" || schoolFilter || teacherFilter) ||
+    hasActiveTrialLessonColumnFilters(columnFilters) ||
+    hasActiveTrialLessonSort(tableSort);
+
+  function updateColumnFilter(key, value) {
+    setColumnFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateTableSort(column, direction) {
+    setTableSort({ column, direction });
+  }
+
+  function clearAllFilters() {
+    const reset = resetTrialLessonTableFilters();
+    setSearch("");
+    setStatusFilter("all");
+    setSchoolFilter("");
+    setTeacherFilter("");
+    setColumnFilters(reset.columnFilters);
+    setTableSort(reset.sort);
+  }
 
   async function handleConvert(trialLessonId, participantId) {
     setConvertingId(participantId);
@@ -361,6 +403,13 @@ export default function TrialLessonsPage() {
             ))}
           </select>
         </label>
+        <div className="toolbar-filter-actions">
+          {hasAnyFilters ? (
+            <button className="ghost-button" onClick={clearAllFilters} type="button">
+              Clear all filters
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
@@ -392,28 +441,166 @@ export default function TrialLessonsPage() {
         />
       ) : null}
 
-      <DataSurface aria-label="Trial lessons list">
+      <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface">
         {state.loading ? (
           <div className="table-placeholder">Loading trial lessons...</div>
-        ) : state.trialLessons.length ? (
+        ) : visibleTrialLessons.length ? (
           <ResponsiveTable>
             <table>
               <thead>
                 <tr>
-                  <th>Trial date</th>
-                  <th>Trial time</th>
-                  <th>Prospect / student name</th>
-                  <th>Age group</th>
-                  <th>Course / level</th>
-                  <th>Lesson type</th>
-                  <th>Assigned teacher</th>
-                  <th>Inquiry source</th>
-                  <th>Status</th>
+                  <ColumnFilterHeader
+                    active={columnFilters.datePreset !== defaultTrialLessonColumnFilters.datePreset || tableSort.column === "trial_date"}
+                    column="trial_date"
+                    label="Trial date"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                    sortLabels={{ asc: "Oldest first", desc: "Newest first" }}
+                  >
+                    <label>
+                      <span>Filter</span>
+                      <select onChange={(event) => updateColumnFilter("datePreset", event.target.value)} value={columnFilters.datePreset}>
+                        {trialLessonDateFilterPresets.map((preset) => (
+                          <option key={preset.value} value={preset.value}>
+                            {preset.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {columnFilters.datePreset === "custom" ? (
+                      <div className="column-filter-menu-grid">
+                        <label>
+                          <span>From</span>
+                          <input onChange={(event) => updateColumnFilter("dateFrom", event.target.value)} type="date" value={columnFilters.dateFrom} />
+                        </label>
+                        <label>
+                          <span>To</span>
+                          <input onChange={(event) => updateColumnFilter("dateTo", event.target.value)} type="date" value={columnFilters.dateTo} />
+                        </label>
+                      </div>
+                    ) : null}
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.time !== defaultTrialLessonColumnFilters.time || tableSort.column === "trial_time"}
+                    column="trial_time"
+                    label="Trial time"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                    sortLabels={{ asc: "Earliest first", desc: "Latest first" }}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("time", value)}
+                      options={columnFilterOptions.times}
+                      value={columnFilters.time}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={Boolean(columnFilters.nameSearch.trim()) || tableSort.column === "name"}
+                    column="name"
+                    label="Prospect / student name"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                    sortLabels={{ asc: "A-Z", desc: "Z-A" }}
+                  >
+                    <label>
+                      <span>Contains</span>
+                      <input
+                        onChange={(event) => updateColumnFilter("nameSearch", event.target.value)}
+                        type="search"
+                        value={columnFilters.nameSearch}
+                      />
+                    </label>
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.ageGroup !== defaultTrialLessonColumnFilters.ageGroup || tableSort.column === "age_group"}
+                    column="age_group"
+                    label="Age group"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("ageGroup", value)}
+                      options={columnFilterOptions.ageGroups}
+                      value={columnFilters.ageGroup}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.level !== defaultTrialLessonColumnFilters.level || tableSort.column === "level"}
+                    column="level"
+                    label="Course / level"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("level", value)}
+                      options={columnFilterOptions.levels}
+                      value={columnFilters.level}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.lessonType !== defaultTrialLessonColumnFilters.lessonType || tableSort.column === "lesson_type"}
+                    column="lesson_type"
+                    label="Lesson type"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("lessonType", value)}
+                      options={columnFilterOptions.lessonTypes}
+                      value={columnFilters.lessonType}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.teacher !== defaultTrialLessonColumnFilters.teacher || tableSort.column === "teacher"}
+                    column="teacher"
+                    label="Assigned teacher"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("teacher", value)}
+                      options={columnFilterOptions.teachers}
+                      value={columnFilters.teacher}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.inquirySource !== defaultTrialLessonColumnFilters.inquirySource || tableSort.column === "inquiry_source"}
+                    column="inquiry_source"
+                    label="Inquiry source"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("inquirySource", value)}
+                      options={columnFilterOptions.inquirySources}
+                      value={columnFilters.inquirySource}
+                    />
+                  </ColumnFilterHeader>
+                  <ColumnFilterHeader
+                    active={columnFilters.status !== defaultTrialLessonColumnFilters.status || tableSort.column === "status"}
+                    column="status"
+                    label="Status"
+                    onSortChange={updateTableSort}
+                    sort={tableSort}
+                  >
+                    <OptionColumnFilter
+                      label="Filter"
+                      onChange={(value) => updateColumnFilter("status", value)}
+                      options={columnFilterOptions.statuses}
+                      value={columnFilters.status}
+                    />
+                  </ColumnFilterHeader>
                   {mayManage ? <th>Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
-                {state.trialLessons.map((trialLesson) => (
+                {visibleTrialLessons.map((trialLesson) => (
                   <TrialLessonRow
                     confirmingId={confirmingId}
                     convertingId={convertingId}
@@ -436,6 +623,59 @@ export default function TrialLessonsPage() {
         )}
       </DataSurface>
     </>
+  );
+}
+
+function ColumnFilterHeader({ active, children, column, label, onSortChange, sort, sortLabels = { asc: "A-Z", desc: "Z-A" } }) {
+  const sortValue = sort.column === column ? sort.direction : "";
+
+  function handleSortChange(event) {
+    const direction = event.target.value;
+    if (!direction) {
+      onSortChange(defaultTrialLessonSort.column, defaultTrialLessonSort.direction);
+      return;
+    }
+
+    onSortChange(column, direction);
+  }
+
+  return (
+    <th>
+      <details className={`table-header-filter${active ? " active" : ""}`}>
+        <summary className="column-filter-summary">
+          <span>{label}</span>
+          <span aria-hidden="true" className="column-filter-arrow">
+            v
+          </span>
+        </summary>
+        <div className="column-filter-menu">
+          <label>
+            <span>Sort</span>
+            <select aria-label={`Sort ${label}`} onChange={handleSortChange} value={sortValue}>
+              <option value="">No sort</option>
+              <option value="asc">{sortLabels.asc}</option>
+              <option value="desc">{sortLabels.desc}</option>
+            </select>
+          </label>
+          {children}
+        </div>
+      </details>
+    </th>
+  );
+}
+
+function OptionColumnFilter({ label, onChange, options, value }) {
+  return (
+    <label>
+      <span>{label}</span>
+      <select onChange={(event) => onChange(event.target.value)} value={value}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -480,7 +720,7 @@ function TrialLessonRow({
       <td>{formatTeacherName(trialLesson.assigned_teacher)}</td>
       <td>{[prospect?.inquiry_methods?.label, prospect?.acquisition_sources?.label].filter(Boolean).join(" / ") || "Not set"}</td>
       <td>
-        <StatusBadge value={trialLesson.status} />
+        <StatusBadge value={trialLesson.status || "unresolved"} />
         {trialLesson.status === "no_show" ? <FollowUpStatus trialLesson={trialLesson} /> : null}
       </td>
       {mayManage ? (

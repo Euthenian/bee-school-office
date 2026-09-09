@@ -193,6 +193,7 @@ test("trial lesson column filters layer on fetched rows and leave actions unfilt
   assert.match(trialLessonsPage, /visibleTrialLessons\.map/);
   assert.match(trialLessonsPage, /mayManage \? <th>Actions<\/th> : null/);
   assert.match(trialLessonsPage, /const linkedStudentId = trialLesson\.converted_student_id \|\| convertedParticipant\?\.converted_student_id/);
-  assert.match(trialLessonsPage, />\s*View student\s*</);
+  assert.match(trialLessonsPage, /aria-label="View student"/);
+  assert.match(trialLessonsPage, /<ActionIcon name="eye" \/>/);
   assert.doesNotMatch(trialLessonsPage, /label="Actions"[\s\S]*ColumnFilterHeader/);
 });

@@ -886,6 +886,75 @@ tr:last-child td {
   justify-content: space-between;
 }
 
+.trial-lesson-selection-bar,
+.trial-lesson-selection-actions {
+  display: flex;
+}
+
+.trial-lesson-selection-bar {
+  align-items: center;
+  background: #f4f7f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.trial-lesson-selection-bar p {
+  color: var(--text);
+  margin: 0;
+}
+
+.trial-lesson-selection-actions {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.trial-lesson-selection-bar .primary-button,
+.trial-lesson-selection-bar .secondary-button,
+.trial-lesson-selection-bar .ghost-button,
+.trial-lesson-selection-bar .danger-button {
+  font-size: 0.84rem;
+  min-height: 32px;
+  padding: 4px 10px;
+}
+
+.trial-lesson-select-header {
+  padding: 0;
+}
+
+.trial-lesson-select-header input,
+.trial-lesson-select-cell input {
+  margin: 0;
+}
+
+.trial-lesson-select-cell {
+  width: 40px;
+}
+
+.selection-column,
+.selection-cell {
+  max-width: 40px;
+  min-width: 40px;
+  width: 40px;
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.trial-lesson-select-header,
+.trial-lesson-select-cell {
+  text-align: center;
+}
+
+.trial-lesson-select-cell input,
+.trial-lesson-select-header input {
+  vertical-align: middle;
+}
 .toolbar-filter-actions {
   align-items: end;
   display: flex;
@@ -1024,6 +1093,26 @@ dd {
   gap: 8px;
 }
 
+.trial-lesson-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.action-icon-button {
+  flex: 0 0 auto;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  width: 36px;
+}
+
+.action-icon {
+  display: block;
+  height: 17px;
+  width: 17px;
+}
+
 .inline-date-form {
   align-items: center;
   display: flex;
@@ -1043,6 +1132,14 @@ dd {
   font-size: 0.86rem;
   min-height: 34px;
   padding: 6px 10px;
+}
+
+.trial-lesson-actions .action-icon-button {
+  height: 36px;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0;
+  width: 36px;
 }
 
 .table-cell-stack,

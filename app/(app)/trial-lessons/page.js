@@ -10,6 +10,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import {
+  buildCommunicationDraft,
+  communicationMessageTypes,
   buildTrialLessonCommunicationContext,
   getDefaultTrialLessonEmail,
   getDefaultTrialLessonPhone
@@ -18,6 +20,8 @@ import { formatLessonTime, formatLessonType, formatTeacherName } from "@/lib/cla
 import {
   confirmTrialLesson,
   convertTrialLessonParticipant,
+  queueCommunication,
+  deleteTrialLessons,
   deleteTrialLesson,
   fetchPendingTrialBookingImportCount,
   fetchSchoolTeachers,
@@ -60,15 +64,19 @@ export default function TrialLessonsPage() {
   const [pendingState, setPendingState] = useState({ loading: true, count: 0 });
   const [actionNotice, setActionNotice] = useState("");
   const [communicatingTrialLesson, setCommunicatingTrialLesson] = useState(null);
+  const [bulkCommunicatingTrialLessons, setBulkCommunicatingTrialLessons] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmingId, setConfirmingId] = useState("");
   const [convertingId, setConvertingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+  const [deletingIds, setDeletingIds] = useState([]);
   const [phoneFollowUpId, setPhoneFollowUpId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [columnFilters, setColumnFilters] = useState(defaultTrialLessonColumnFilters);
   const [tableSort, setTableSort] = useState(defaultTrialLessonSort);
+  const [selectedTrialLessonIds, setSelectedTrialLessonIds] = useState(() => new Set());
   const mayManage = canManageTrialLessons(profile);
 
   useEffect(() => {
@@ -167,6 +175,7 @@ export default function TrialLessonsPage() {
 
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
   const todayKey = useMemo(() => getLocalDateKey(), []);
+  const availableTrialLessonIds = useMemo(() => new Set(state.trialLessons.map((trialLesson) => trialLesson.id)), [state.trialLessons]);
   const columnFilterOptions = useMemo(
     () => buildTrialLessonColumnFilterOptions(state.trialLessons),
     [state.trialLessons]
@@ -175,10 +184,68 @@ export default function TrialLessonsPage() {
     () => filterAndSortTrialLessons(state.trialLessons, { columnFilters, sort: tableSort, today: todayKey }),
     [columnFilters, state.trialLessons, tableSort, todayKey]
   );
+  const validSelectedTrialLessonIds = useMemo(() => {
+    const next = new Set();
+    for (const selectedTrialLessonId of selectedTrialLessonIds) {
+      if (availableTrialLessonIds.has(selectedTrialLessonId)) {
+        next.add(selectedTrialLessonId);
+      }
+    }
+
+    return next;
+  }, [availableTrialLessonIds, selectedTrialLessonIds]);
+  const selectedTrialLessons = useMemo(
+    () => state.trialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)),
+    [state.trialLessons, validSelectedTrialLessonIds]
+  );
+  const selectedTrialLessonCount = validSelectedTrialLessonIds.size;
+  const visibleSelectedTrialLessonCount = visibleTrialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)).length;
+  const allVisibleSelected =
+    Boolean(visibleTrialLessons.length) && visibleSelectedTrialLessonCount === visibleTrialLessons.length;
   const hasAnyFilters =
     Boolean(search.trim() || statusFilter !== "all" || schoolFilter || teacherFilter) ||
     hasActiveTrialLessonColumnFilters(columnFilters) ||
     hasActiveTrialLessonSort(tableSort);
+
+  function getBulkEmailDefaultMessageType() {
+    return selectedTrialLessons.length && selectedTrialLessons.every((trialLesson) => trialLesson.status === "no_show")
+      ? "no_show_follow_up"
+      : "trial_lesson_confirmation";
+  }
+
+  function setTrialLessonSelection(trialLessonId, shouldSelect) {
+    setSelectedTrialLessonIds((current) => {
+      const next = new Set(current);
+      if (shouldSelect) {
+        next.add(trialLessonId);
+      } else {
+        next.delete(trialLessonId);
+      }
+
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedTrialLessonIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) {
+        for (const lesson of visibleTrialLessons) {
+          next.delete(lesson.id);
+        }
+      } else {
+        for (const lesson of visibleTrialLessons) {
+          next.add(lesson.id);
+        }
+      }
+
+      return next;
+    });
+  }
+
+  function clearTrialLessonSelection() {
+    setSelectedTrialLessonIds(new Set());
+  }
 
   function updateColumnFilter(key, value) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -280,43 +347,119 @@ export default function TrialLessonsPage() {
     setDeleteTarget(trialLesson);
   }
 
+  function handleBulkDeleteRequest() {
+    setActionNotice("");
+    setDeleteError("");
+    setDeletingIds(Array.from(validSelectedTrialLessonIds));
+    setDeleteTarget(null);
+    setIsDeletingBulk(false);
+  }
+
+  function clearBulkDeleteState() {
+    setDeletingIds([]);
+    setDeleteError("");
+    setIsDeletingBulk(false);
+  }
+
   function handleDeleteCancel() {
-    if (deletingId) return;
+    if (deletingId || isDeletingBulk) return;
 
     setDeleteError("");
     setDeleteTarget(null);
+    clearBulkDeleteState();
   }
 
   async function handleDeleteConfirm() {
-    if (!deleteTarget) return;
+    if (deleteTarget) {
+      setDeletingId(deleteTarget.id);
+      setActionNotice("");
+      setDeleteError("");
+      setState((current) => ({ ...current, error: "" }));
 
-    setDeletingId(deleteTarget.id);
-    setActionNotice("");
-    setDeleteError("");
-    setState((current) => ({ ...current, error: "" }));
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase || !session) {
+        setDeleteError("You must be signed in before deleting a trial lesson.");
+        setDeletingId("");
+        return;
+      }
 
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase || !session) {
-      setDeleteError("You must be signed in before deleting a trial lesson.");
+      const { error } = await deleteTrialLesson(supabase, deleteTarget.id);
+
+      if (error) {
+        setDeleteError(error.message);
+        setDeletingId("");
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        trialLessons: removeTrialLessonById(current.trialLessons, deleteTarget.id)
+      }));
+      setActionNotice("Trial lesson deleted.");
+      setDeleteTarget(null);
       setDeletingId("");
       return;
     }
 
-    const { error } = await deleteTrialLesson(supabase, deleteTarget.id);
+    if (!deletingIds.length) return;
 
+    const ids = [...deletingIds];
+    setDeletingIds(ids);
+    setIsDeletingBulk(true);
+    const deletableIds = state.trialLessons
+      .filter((trialLesson) => ids.includes(trialLesson.id))
+      .map((trialLesson) => trialLesson.id);
+    if (!deletableIds.length) {
+      clearBulkDeleteState();
+      return;
+    }
+
+    setActionNotice("");
+    setDeleteError("");
+    setState((current) => ({ ...current, error: "" }));
+    setDeletingIds(ids);
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setDeleteError("You must be signed in before deleting trial lessons.");
+      clearBulkDeleteState();
+      return;
+    }
+
+    const { error } = await deleteTrialLessons(supabase, deletableIds);
     if (error) {
       setDeleteError(error.message);
-      setDeletingId("");
+      clearBulkDeleteState();
       return;
     }
 
     setState((current) => ({
       ...current,
-      trialLessons: removeTrialLessonById(current.trialLessons, deleteTarget.id)
+      trialLessons: current.trialLessons.filter((trialLesson) => !deletableIds.includes(trialLesson.id))
     }));
-    setActionNotice("Trial lesson deleted.");
-    setDeleteTarget(null);
-    setDeletingId("");
+    setActionNotice(`${deletableIds.length} trial lessons deleted.`);
+    clearTrialLessonSelection();
+    clearBulkDeleteState();
+  }
+
+  function handleBulkEmailOpen() {
+    setActionNotice("");
+    setBulkCommunicatingTrialLessons(selectedTrialLessons);
+  }
+
+  function handleBulkEmailSent(sentSummary = { sentCount: 0, skippedCount: 0, total: 0 }) {
+    setBulkCommunicatingTrialLessons([]);
+    const { sentCount = 0, skippedCount = 0 } = sentSummary;
+    const suffix = sentCount === 1 ? "" : "s";
+    setActionNotice(
+      `${sentCount} email${suffix} queued for secure sending.${skippedCount ? ` ${skippedCount} recipient(s) skipped (no valid email).` : ""}`
+    );
+    setRefreshKey((current) => current + 1);
+    clearTrialLessonSelection();
+  }
+
+  function handleBulkEmailCancel() {
+    setBulkCommunicatingTrialLessons([]);
   }
 
   function handleEmailSent() {
@@ -415,6 +558,25 @@ export default function TrialLessonsPage() {
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
       {actionNotice ? <p className="inline-success">{actionNotice}</p> : null}
 
+      {selectedTrialLessonCount > 0 && mayManage ? (
+        <div className="trial-lesson-selection-bar">
+          <p>
+            <strong>{selectedTrialLessonCount}</strong> selected
+          </p>
+          <div className="trial-lesson-selection-actions">
+            <button className="primary-button" onClick={handleBulkEmailOpen} type="button">
+              Send email
+            </button>
+            <button className="danger-button" onClick={handleBulkDeleteRequest} type="button">
+              Delete {selectedTrialLessonCount}
+            </button>
+            <button className="ghost-button" onClick={clearTrialLessonSelection} type="button">
+              Clear selection
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {communicatingTrialLesson ? (
         <CommunicationComposer
           context={{
@@ -432,9 +594,28 @@ export default function TrialLessonsPage() {
         />
       ) : null}
 
+      {bulkCommunicatingTrialLessons.length ? (
+        <BulkCommunicationComposer
+          isSignedIn={Boolean(session)}
+          defaultMessageType={getBulkEmailDefaultMessageType()}
+          onCancel={handleBulkEmailCancel}
+          onSent={handleBulkEmailSent}
+          trialLessons={bulkCommunicatingTrialLessons}
+        />
+      ) : null}
+
       {deleteTarget ? (
         <DeleteTrialLessonDialog
           deleting={deletingId === deleteTarget.id}
+          error={deleteError}
+          onCancel={handleDeleteCancel}
+          onConfirm={handleDeleteConfirm}
+        />
+      ) : null}
+      {deletingIds.length ? (
+        <BulkDeleteTrialLessonDialog
+          deleting={isDeletingBulk}
+          deleteCount={deletingIds.length}
           error={deleteError}
           onCancel={handleDeleteCancel}
           onConfirm={handleDeleteConfirm}
@@ -449,6 +630,17 @@ export default function TrialLessonsPage() {
             <table>
               <thead>
                 <tr>
+                  {mayManage ? (
+                    <th className="selection-column trial-lesson-select-header">
+                      <input
+                        aria-label="Select all visible trial lessons"
+                        checked={allVisibleSelected}
+                        disabled={visibleTrialLessons.length === 0}
+                        onChange={toggleSelectAllVisible}
+                        type="checkbox"
+                      />
+                    </th>
+                  ) : null}
                   <ColumnFilterHeader
                     active={columnFilters.datePreset !== defaultTrialLessonColumnFilters.datePreset || tableSort.column === "trial_date"}
                     column="trial_date"
@@ -602,12 +794,14 @@ export default function TrialLessonsPage() {
               <tbody>
                 {visibleTrialLessons.map((trialLesson) => (
                   <TrialLessonRow
+                    isSelected={validSelectedTrialLessonIds.has(trialLesson.id)}
                     confirmingId={confirmingId}
                     convertingId={convertingId}
                     key={trialLesson.id}
                     mayManage={mayManage}
                     onConfirm={handleConfirm}
                     onConvert={handleConvert}
+                    onSelectionChange={setTrialLessonSelection}
                     onRequestDelete={handleDeleteRequest}
                     onOpenComposer={setCommunicatingTrialLesson}
                     onPhoneFollowUpComplete={handlePhoneFollowUpComplete}
@@ -679,12 +873,182 @@ function OptionColumnFilter({ label, onChange, options, value }) {
   );
 }
 
+const trialLessonEmailPattern = /^[^@\s,<>]+@[^@\s,<>]+\.[^@\s,<>]+$/;
+
+function isValidTrialLessonEmail(value) {
+  return trialLessonEmailPattern.test(String(value || "").trim());
+}
+
+function BulkCommunicationComposer({ defaultMessageType, isSignedIn, onCancel, onSent, trialLessons }) {
+  const [state, setState] = useState({ error: "", sending: false });
+  const [form, setForm] = useState(() => {
+    const context = buildTrialLessonCommunicationContext(trialLessons[0]);
+    const draft = buildCommunicationDraft(defaultMessageType || "trial_lesson_confirmation", context);
+
+    return {
+      body: draft.body,
+      messageType: defaultMessageType || "trial_lesson_confirmation",
+      subject: draft.subject,
+      subjectTouched: false,
+      bodyTouched: false
+    };
+  });
+
+  const recipients = useMemo(
+    () =>
+      trialLessons.map((trialLesson) => {
+        const email = getDefaultTrialLessonEmail(trialLesson);
+        return {
+          context: buildTrialLessonCommunicationContext(trialLesson),
+          email,
+          trialLessonId: trialLesson.id,
+          prospectId: trialLesson.prospects?.id || "",
+          schoolId: trialLesson.school_id,
+          organizationId: trialLesson.organization_id,
+          validEmail: isValidTrialLessonEmail(email)
+        };
+      }),
+    [trialLessons]
+  );
+
+  const sendableRecipients = useMemo(() => recipients.filter((item) => item.validEmail), [recipients]);
+  const skippedRecipientCount = recipients.length - sendableRecipients.length;
+
+  function updateField(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "subject" ? { subjectTouched: true } : {}),
+      ...(field === "body" ? { bodyTouched: true } : {})
+    }));
+  }
+
+  function updateMessageType(value) {
+    const context = buildTrialLessonCommunicationContext(trialLessons[0]);
+    const draft = buildCommunicationDraft(value, context);
+
+    setForm({
+      body: draft.body,
+      messageType: value,
+      subject: draft.subject,
+      subjectTouched: false,
+      bodyTouched: false
+    });
+  }
+
+  function getDraftForRecipient(recipient) {
+    const rendered = buildCommunicationDraft(form.messageType, recipient.context);
+    return {
+      body: form.bodyTouched ? form.body : rendered.body,
+      subject: form.subjectTouched ? form.subject : rendered.subject,
+      templateKey: rendered.templateKey
+    };
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setState({ error: "", sending: true });
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !isSignedIn) {
+      setState({ error: "You must be signed in before sending email.", sending: false });
+      return;
+    }
+
+    for (const recipient of sendableRecipients) {
+      const draft = getDraftForRecipient(recipient);
+      const { error } = await queueCommunication(supabase, {
+        channel: "email",
+        communicationType: form.messageType,
+        organizationId: recipient.organizationId,
+        prospectId: recipient.prospectId,
+        recipient: recipient.email,
+        schoolId: recipient.schoolId,
+        subject: draft.subject,
+        body: draft.body,
+        templateKey: draft.templateKey,
+        trialLessonId: recipient.trialLessonId
+      });
+
+      if (error) {
+        setState({ error: error.message, sending: false });
+        return;
+      }
+    }
+
+    onSent({ sentCount: sendableRecipients.length, skippedCount: skippedRecipientCount, total: recipients.length });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-labelledby="bulk-communications-title" aria-modal="true" className="communication-modal" role="dialog">
+        <header className="communication-modal-header">
+          <div>
+            <p className="eyebrow">Communication</p>
+            <h2 id="bulk-communications-title">Send bulk email</h2>
+          </div>
+          <button className="ghost-button" onClick={onCancel} type="button">
+            Cancel
+          </button>
+        </header>
+        <div className="communication-form-grid single-column communication-form-grid">
+          <p className="eyebrow" id="bulk-communications-selection-summary">
+            {trialLessons.length} selected
+          </p>
+          <p className="eyebrow">{sendableRecipients.length} sendable</p>
+          <p className="eyebrow">
+            {skippedRecipientCount} skipped — no valid email
+          </p>
+        </div>
+        <form className="student-form" onSubmit={handleSubmit}>
+          {state.error ? <p className="inline-alert">{state.error}</p> : null}
+
+          <div className="form-grid single-column communication-form-grid">
+            <label>
+              <span>Message type</span>
+              <select onChange={(event) => updateMessageType(event.target.value)} value={form.messageType}>
+                {communicationMessageTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Subject</span>
+              <input onChange={(event) => updateField("subject", event.target.value)} required type="text" value={form.subject} />
+            </label>
+
+            <label>
+              <span>Message body</span>
+              <textarea onChange={(event) => updateField("body", event.target.value)} required value={form.body} />
+            </label>
+          </div>
+
+          <div className="form-actions communication-form-actions">
+            <button className="secondary-button" onClick={onCancel} type="button">
+              Cancel
+            </button>
+            <button className="primary-button" disabled={state.sending} type="submit">
+              {state.sending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function TrialLessonRow({
   confirmingId,
   convertingId,
   mayManage,
+  isSelected,
   onConfirm,
   onConvert,
+  onSelectionChange,
   onOpenComposer,
   onPhoneFollowUpComplete,
   onRequestDelete,
@@ -705,6 +1069,16 @@ function TrialLessonRow({
 
   return (
     <tr>
+      {mayManage ? (
+        <td className="selection-cell trial-lesson-select-cell">
+          <input
+            aria-label={`Select trial lesson ${trialLesson.id}`}
+            checked={Boolean(isSelected)}
+            onChange={(event) => onSelectionChange(trialLesson.id, event.target.checked)}
+            type="checkbox"
+          />
+        </td>
+      ) : null}
       <td>{formatDate(trialLesson.trial_date)}</td>
       <td>{formatLessonTime(trialLesson.trial_time)}</td>
       <td>
@@ -725,54 +1099,183 @@ function TrialLessonRow({
       </td>
       {mayManage ? (
         <td>
-          <div className="table-actions">
+          <div className="table-actions trial-lesson-actions">
             {linkedStudentId ? (
-              <Link className="primary-button" href={`/students/profile/?id=${linkedStudentId}`}>
-                View student
+              <Link
+                aria-label="View student"
+                className="primary-button action-icon-button"
+                href={`/students/profile/?id=${linkedStudentId}`}
+                title="View student"
+              >
+                <ActionIcon name="eye" />
               </Link>
             ) : (
               conversionParticipants.map((item) => (
                 <button
-                  className="convert-button"
+                  aria-label={`Convert ${item.japanese_name}`}
+                  className="convert-button action-icon-button"
                   disabled={Boolean(convertingId)}
                   key={item.id}
                   onClick={() => onConvert(trialLesson.id, item.id)}
+                  title={convertingId === item.id ? "Converting..." : `Convert ${item.japanese_name}`}
                   type="button"
                 >
-                  {convertingId === item.id ? "Converting..." : `Convert ${item.japanese_name}`}
+                  <ActionIcon name="user-plus" />
                 </button>
               ))
             )}
             {canConfirm ? (
               <button
-                className="secondary-button"
+                aria-label="Confirm trial lesson"
+                className="secondary-button action-icon-button"
                 disabled={confirmingId === trialLesson.id}
                 onClick={() => onConfirm(trialLesson)}
+                title={confirmingId === trialLesson.id ? "Confirming..." : "Confirm trial lesson"}
                 type="button"
               >
-                {confirmingId === trialLesson.id ? "Confirming..." : "Confirm trial lesson"}
+                <ActionIcon name="check" />
               </button>
             ) : null}
-            <button className="secondary-button" disabled={!prospectEmail} onClick={() => onOpenComposer(trialLesson)} type="button">
-              Send email
+            <button
+              aria-label="Send email"
+              className="secondary-button action-icon-button"
+              disabled={!prospectEmail}
+              onClick={() => onOpenComposer(trialLesson)}
+              title="Send email"
+              type="button"
+            >
+              <ActionIcon name="send" />
             </button>
             {needsPhoneFollowUp ? (
               <button
-                className="ghost-button"
+                aria-label="Mark phone follow-up complete"
+                className="ghost-button action-icon-button"
                 disabled={phoneFollowUpId === trialLesson.id}
                 onClick={() => onPhoneFollowUpComplete(trialLesson)}
+                title={phoneFollowUpId === trialLesson.id ? "Saving..." : "Mark phone follow-up complete"}
                 type="button"
               >
-                {phoneFollowUpId === trialLesson.id ? "Saving..." : "Mark phone follow-up complete"}
+                <ActionIcon name="phone" />
               </button>
             ) : null}
-            <button className="danger-button" onClick={() => onRequestDelete(trialLesson)} type="button">
-              Delete
+            <button
+              aria-label="Delete"
+              className="danger-button action-icon-button"
+              onClick={() => onRequestDelete(trialLesson)}
+              title="Delete"
+              type="button"
+            >
+              <ActionIcon name="trash" />
             </button>
           </div>
         </td>
       ) : null}
     </tr>
+  );
+}
+
+function ActionIcon({ name }) {
+  const icons = {
+    check: (
+      <path
+        d="M5 12.5 9.1 16.5 19 6.5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    ),
+    eye: (
+      <>
+        <path
+          d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <circle cx="12" cy="12" fill="none" r="3" stroke="currentColor" strokeWidth="2" />
+      </>
+    ),
+    phone: (
+      <path
+        d="M6.5 4.5 9 4l2 4-1.8 1.2a11 11 0 0 0 5.6 5.6L16 13l4 2-.5 2.5c-.2 1-1.1 1.7-2.1 1.6C10.5 18.6 5.4 13.5 4.9 6.6c-.1-1 .6-1.9 1.6-2.1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    ),
+    send: (
+      <>
+        <path
+          d="M21 3 10 14"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <path
+          d="m21 3-7 18-4-7-7-4 18-7Z"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </>
+    ),
+    trash: (
+      <>
+        <path
+          d="M4 7h16"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </>
+    ),
+    "user-plus": (
+      <>
+        <path
+          d="M15 19c0-2.2-2.2-4-5-4s-5 1.8-5 4"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <circle cx="10" cy="8" fill="none" r="3" stroke="currentColor" strokeWidth="2" />
+        <path
+          d="M19 8v6M16 11h6"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </>
+    )
+  };
+
+  return (
+    <svg aria-hidden="true" className="action-icon" focusable="false" viewBox="0 0 24 24">
+      {icons[name]}
+    </svg>
   );
 }
 
@@ -799,6 +1302,36 @@ function DeleteTrialLessonDialog({ deleting, error, onCancel, onConfirm }) {
           </button>
           <button className="danger-button" disabled={deleting} onClick={onConfirm} type="button">
             {deleting ? "Deleting..." : "Delete trial lesson"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BulkDeleteTrialLessonDialog({ deleteCount, deleting, error, onCancel, onConfirm }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="bulk-delete-trial-lessons-description"
+        aria-labelledby="bulk-delete-trial-lessons-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="bulk-delete-trial-lessons-title">Delete {deleteCount} selected Trial Lessons?</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          <p id="bulk-delete-trial-lessons-description">This action cannot be undone.</p>
+          {error ? <p className="inline-alert">{error}</p> : null}
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" disabled={deleting} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="danger-button" disabled={deleting} onClick={onConfirm} type="button">
+            {deleting ? "Deleting..." : `Delete ${deleteCount}`}
           </button>
         </div>
       </section>

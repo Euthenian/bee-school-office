@@ -1480,11 +1480,12 @@ test("student edit state preserves relational form values", () => {
 });
 
 test("converted trial lessons link by stored student id without redundant action text", () => {
-  assert.match(trialLessonsPage, /className="convert-button"/);
+  assert.match(trialLessonsPage, /className="convert-button action-icon-button"/);
   assert.doesNotMatch(trialLessonsPage, />\s*Converted\s*</);
   assert.match(trialLessonsPage, /const convertedParticipant = trialLesson\.trial_lesson_participants\?\.find/);
   assert.match(trialLessonsPage, /const linkedStudentId = trialLesson\.converted_student_id \|\| convertedParticipant\?\.converted_student_id/);
   assert.match(trialLessonsPage, /\{linkedStudentId \? \(/);
   assert.match(trialLessonsPage, /href=\{`\/students\/profile\/\?id=\$\{linkedStudentId\}`\}/);
-  assert.match(trialLessonsPage, />\s*View student\s*</);
+  assert.match(trialLessonsPage, /aria-label="View student"/);
+  assert.match(trialLessonsPage, /<ActionIcon name="eye" \/>/);
 });

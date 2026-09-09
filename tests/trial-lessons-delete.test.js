@@ -15,7 +15,7 @@ const deleteFunctionSql =
   "";
 
 test("trial lesson delete action uses confirmation before deleting", () => {
-  assert.match(trialLessonsPage, /className="danger-button" onClick=\{\(\) => onRequestDelete\(trialLesson\)\} type="button">\s*Delete\s*<\/button>/);
+  assert.match(trialLessonsPage, /aria-label="Delete"[\s\S]*className="danger-button action-icon-button"[\s\S]*onClick=\{\(\) => onRequestDelete\(trialLesson\)\}[\s\S]*title="Delete"[\s\S]*<ActionIcon name="trash" \/>/);
   assert.match(trialLessonsPage, /DeleteTrialLessonDialog/);
   assert.match(trialLessonsPage, /Delete this trial lesson\?/);
   assert.match(trialLessonsPage, /This action cannot be undone\./);

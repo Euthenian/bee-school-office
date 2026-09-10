@@ -62,7 +62,7 @@ That RPC:
 - revokes prior active invitations for the same student;
 - queues a normal `communications` row and Resend `communication_integration_actions` row.
 
-The existing `communications-dispatch` Edge Function prepares AI-EIGO invitation email payloads just before sending, sends through the server-side Resend provider, and records delivery through `record_communication_integration_result`. Gmail Trial Booking polling remains separate and read-only.
+The existing `communications-dispatch` Edge Function prepares AI-EIGO invitation email payloads just before sending, sends through the server-side Resend provider with `AI_EIGO_INVITATION_EMAIL_FROM`, and records delivery through `record_communication_integration_result`. Normal Bee School Office email uses `BEE_SCHOOL_EMAIL_FROM` instead. Gmail Trial Booking polling remains separate and read-only.
 
 Email failure sets the invitation to `send_failed`, clears the token hash, and leaves a safe retry path.
 

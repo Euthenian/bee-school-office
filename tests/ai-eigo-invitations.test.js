@@ -183,13 +183,19 @@ test("communications worker prepares AI-EIGO invitation email just in time and u
   const prepared = [];
 
   const result = await processQueuedCommunicationActions({
-    config: { googleReady: true, resendReady: true, maxActions: 10 },
-    emailProvider: {
-      async sendEmail() {
-        throw new Error("Gmail should not be used for AI-EIGO invitations.");
-      }
+    config: {
+      googleReady: true,
+      resendReady: true,
+      resendApiKey: "resend-key",
+      aiEigoInvitationEmailFrom: "AI-EIGO <hello@ai-eigo.com>",
+      maxActions: 10
     },
     resendProvider: {
+      async sendEmail() {
+        throw new Error("Bee School sender should not be used for AI-EIGO invitations.");
+      }
+    },
+    aiEigoInvitationResendProvider: {
       async sendEmail(payload) {
         emails.push(payload);
         return { externalId: "resend-message-1", responsePayload: { id: "resend-message-1" }, status: "succeeded" };

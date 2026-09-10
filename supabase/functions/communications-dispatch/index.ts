@@ -1,5 +1,4 @@
 import {
-  createGmailSenderClient,
   createGoogleCalendarClient,
   createResendSenderClient,
   createSupabaseRestCommunicationsRepository,
@@ -38,22 +37,23 @@ Deno.serve(async (request) => {
 
   const result = await processQueuedCommunicationActions({
     config,
-    emailProvider: config.googleReady
-      ? createGmailSenderClient(
+    resendProvider: config.beeSchoolResendReady
+      ? createResendSenderClient(
           {
-            clientId: config.googleClientId,
-            clientSecret: config.googleClientSecret,
-            refreshToken: config.googleRefreshToken,
-            senderEmail: config.gmailSenderEmail,
+            apiKey: config.beeSchoolResendApiKey,
+            apiKeySecretName: "BEE_SCHOOL_RESEND_API_KEY",
+            from: config.beeSchoolEmailFrom,
+            fromSecretName: "BEE_SCHOOL_EMAIL_FROM",
           },
           fetch,
         )
       : null,
-    resendProvider: config.resendReady
+    aiEigoInvitationResendProvider: config.aiEigoInvitationResendReady
       ? createResendSenderClient(
           {
             apiKey: config.resendApiKey,
             from: config.aiEigoInvitationEmailFrom,
+            fromSecretName: "AI_EIGO_INVITATION_EMAIL_FROM",
           },
           fetch,
         )

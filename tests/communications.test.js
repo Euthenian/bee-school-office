@@ -18,6 +18,14 @@ const communicationsMigrationSql = readFileSync(
   new URL("../supabase/migrations/20260827001000_communications_followup_foundation.sql", import.meta.url),
   "utf8"
 );
+const communicationDeliveryStatusEnumFixSql = readFileSync(
+  new URL("../supabase/migrations/20260909004000_fix_communication_delivery_status_enum_casts.sql", import.meta.url),
+  "utf8"
+);
+const communicationsUseResendOutboundSql = readFileSync(
+  new URL("../supabase/migrations/20260909005000_communications_use_resend_outbound.sql", import.meta.url),
+  "utf8"
+);
 const communicationsWorkerSource = readFileSync(new URL("../lib/communications-worker.js", import.meta.url), "utf8");
 const communicationsPage = readFileSync(new URL("../app/(app)/communications/page.js", import.meta.url), "utf8");
 const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/page.js", import.meta.url), "utf8");
@@ -91,6 +99,52 @@ test("communications migration creates tenant-safe logs, idempotent actions, RLS
   assert.match(communicationsMigrationSql, /notify pgrst, 'reload schema'/);
 });
 
+test("communication queue RPCs cast delivery_status values to the enum type", () => {
+  assert.match(
+    communicationsMigrationSql,
+    /create type public\.communication_delivery_status as enum \('draft', 'queued', 'sent', 'failed', 'partial_failed', 'skipped'\)/
+  );
+  assert.match(communicationDeliveryStatusEnumFixSql, /create or replace function public\.queue_communication_mvp/);
+  assert.match(
+    communicationDeliveryStatusEnumFixSql,
+    /when p_channel = 'email' then 'queued'::public\.communication_delivery_status/
+  );
+  assert.match(communicationDeliveryStatusEnumFixSql, /else 'sent'::public\.communication_delivery_status/);
+  assert.doesNotMatch(
+    communicationDeliveryStatusEnumFixSql,
+    /case\s+when p_channel = 'email' then 'queued' else 'sent' end/
+  );
+  assert.match(
+    communicationDeliveryStatusEnumFixSql,
+    /create or replace function public\.send_ai_eigo_student_invitation_mvp/
+  );
+  assert.match(communicationDeliveryStatusEnumFixSql, /'queued'::public\.communication_delivery_status/);
+  assert.match(communicationDeliveryStatusEnumFixSql, /insert into public\.communications as c \(/);
+  assert.match(communicationsMigrationSql, /'failed'::public\.communication_delivery_status/);
+  assert.match(communicationsMigrationSql, /'skipped'::public\.communication_delivery_status/);
+});
+
+test("Bee School Office outbound communication queues use Resend", () => {
+  assert.match(communicationsUseResendOutboundSql, /create or replace function public\.queue_communication_mvp/);
+  assert.match(communicationsUseResendOutboundSql, /create or replace function public\.confirm_trial_lesson_mvp/);
+  assert.match(communicationsUseResendOutboundSql, /create or replace function public\.enqueue_due_no_show_follow_ups/);
+  assert.match(communicationsUseResendOutboundSql, /check \(provider in \('gmail', 'google_calendar', 'internal', 'resend'\)\)/);
+  assert.match(communicationsUseResendOutboundSql, /case when p_channel = 'email' then 'resend' else null end/);
+  assert.match(communicationsUseResendOutboundSql, /'communication:' \|\| v_communication_id::text \|\| ':resend_send'/);
+  assert.match(communicationsUseResendOutboundSql, /v_email_action_idempotency_key = v_email_idempotency_key \|\| ':resend_send'/);
+  assert.match(communicationsUseResendOutboundSql, /'resend',\s+'send_email'/);
+  assert.doesNotMatch(communicationsUseResendOutboundSql, /'gmail',\s+'send_email'/);
+  assert.doesNotMatch(communicationsEdgeFunction, /createGmailSenderClient/);
+  assert.match(communicationsEdgeFunction, /createResendSenderClient/);
+  assert.match(communicationsEdgeFunction, /BEE_SCHOOL_RESEND_API_KEY/);
+  assert.match(communicationsEdgeFunction, /BEE_SCHOOL_EMAIL_FROM/);
+  assert.match(communicationsEdgeFunction, /AI_EIGO_INVITATION_EMAIL_FROM/);
+  assert.match(communicationsWorkerSource, /beeSchoolResendApiKey/);
+  assert.match(communicationsWorkerSource, /beeSchoolEmailFrom/);
+  assert.match(communicationsWorkerSource, /aiEigoInvitationEmailFrom/);
+  assert.match(communicationsWorkerSource, /Gmail outbound email is disabled; email actions must use Resend\./);
+});
+
 test("communications stay administrative in UI and data helpers expose follow-up fields", () => {
   assert.equal(canManageCommunications({ school_memberships: [{ role: "teacher" }] }), false);
   assert.equal(canManageCommunications({ school_memberships: [{ role: "office_staff" }] }), true);
@@ -133,20 +187,27 @@ test("communications Edge Function uses server secrets and reports setup-require
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "GOOGLE_REFRESH_TOKEN",
-    "GOOGLE_GMAIL_SENDER_EMAIL",
     "GOOGLE_CALENDAR_ID"
   ]);
   assert.equal(config.resendReady, false);
-  assert.deepEqual(config.missingResendSecrets, ["RESEND_API_KEY", "AI_EIGO_INVITATION_EMAIL_FROM"]);
+  assert.deepEqual(config.missingResendSecrets, [
+    "RESEND_API_KEY",
+    "BEE_SCHOOL_RESEND_API_KEY",
+    "BEE_SCHOOL_EMAIL_FROM",
+    "AI_EIGO_INVITATION_EMAIL_FROM"
+  ]);
   assert.match(communicationsEdgeFunction, /COMMUNICATIONS_CRON_SECRET/);
   assert.match(communicationsEdgeFunction, /createResendSenderClient/);
   assert.match(communicationsWorkerSource, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(communicationsWorkerSource, /RESEND_API_KEY/);
+  assert.match(communicationsWorkerSource, /BEE_SCHOOL_RESEND_API_KEY/);
+  assert.match(communicationsWorkerSource, /BEE_SCHOOL_EMAIL_FROM/);
   assert.match(communicationsWorkerSource, /AI_EIGO_INVITATION_EMAIL_FROM/);
   assert.doesNotMatch(studentProfilePage, /SERVICE_ROLE|GOOGLE_CLIENT_SECRET|GOOGLE_REFRESH_TOKEN/);
   assert.doesNotMatch(trialLessonsPage, /SERVICE_ROLE|GOOGLE_CLIENT_SECRET|GOOGLE_REFRESH_TOKEN/);
   assert.match(gmailTrialBookingWorkerSource, /GMAIL_SOURCE_MAILBOX/);
   assert.match(gmailTrialBookingWorkerSource, /https:\/\/gmail\.googleapis\.com\/gmail\/v1/);
+  assert.doesNotMatch(communicationsWorkerSource, /users\/\$\{encodeURIComponent\(senderEmail\)\}\/messages\/send/);
   assert.doesNotMatch(gmailTrialBookingWorkerSource, /RESEND_API_KEY|AI_EIGO_INVITATION_EMAIL_FROM|resend/i);
 });
 
@@ -208,17 +269,26 @@ test("Resend sender failures do not report success", async () => {
   );
 });
 
-test("communications worker processes queued email and calendar actions idempotently", async () => {
+test("communications worker processes Resend email and calendar actions idempotently", async () => {
   const recordedResults = [];
   const result = await processQueuedCommunicationActions({
     config: {
       googleReady: true,
+      resendReady: true,
+      resendApiKey: "ai-eigo-resend-key",
+      beeSchoolResendApiKey: "bee-school-resend-key",
+      beeSchoolEmailFrom: "Bee School <binfo@beeschool.jp>",
       maxActions: 10
     },
-    emailProvider: {
+    resendProvider: {
       async sendEmail(payload) {
         assert.equal(payload.recipient, "parent@example.com");
-        return { externalId: "gmail-message-1", responsePayload: { id: "gmail-message-1" }, status: "succeeded" };
+        return { externalId: "resend-message-1", responsePayload: { id: "resend-message-1" }, status: "succeeded" };
+      }
+    },
+    aiEigoInvitationResendProvider: {
+      async sendEmail() {
+        throw new Error("AI-EIGO invitation sender should not handle Bee School Office email.");
       }
     },
     calendarProvider: {
@@ -235,7 +305,7 @@ test("communications worker processes queued email and calendar actions idempote
         return [
           {
             idempotency_key: "trial-1-email",
-            provider: "gmail",
+            provider: "resend",
             action_type: "send_email",
             request_payload: {
               recipient: "parent@example.com",
@@ -268,8 +338,114 @@ test("communications worker processes queued email and calendar actions idempote
   assert.equal(result.succeeded, 2);
   assert.deepEqual(
     recordedResults.map((row) => row.externalId),
-    ["gmail-message-1", "calendar-event-1"]
+    ["resend-message-1", "calendar-event-1"]
   );
+});
+
+test("Bee School email requires the dedicated Bee School Resend key without falling back to AI-EIGO", async () => {
+  const recordedResults = [];
+  const result = await processQueuedCommunicationActions({
+    config: {
+      googleReady: true,
+      resendReady: false,
+      resendApiKey: "ai-eigo-resend-key",
+      beeSchoolEmailFrom: "Bee School <binfo@beeschool.jp>",
+      missingResendSecrets: ["BEE_SCHOOL_RESEND_API_KEY"],
+      maxActions: 10
+    },
+    resendProvider: {
+      async sendEmail() {
+        throw new Error("Bee School email must not fall back to the AI-EIGO Resend key.");
+      }
+    },
+    aiEigoInvitationResendProvider: {
+      async sendEmail() {
+        throw new Error("AI-EIGO sender should not handle Bee School Office email.");
+      }
+    },
+    repository: {
+      async enqueueDueNoShowFollowUps() {
+        return [];
+      },
+      async listPendingIntegrationActions() {
+        return [
+          {
+            idempotency_key: "bee-school-email",
+            provider: "resend",
+            action_type: "send_email",
+            request_payload: {
+              recipient: "parent@example.com",
+              subject: "Subject",
+              body: "Body"
+            }
+          }
+        ];
+      },
+      async recordActionResult(row) {
+        recordedResults.push(row);
+      }
+    },
+    logger: quietLogger()
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.setupRequired, true);
+  assert.equal(result.processed, 0);
+  assert.equal(result.skipped, 1);
+  assert.deepEqual(result.missingResendSecrets, ["BEE_SCHOOL_RESEND_API_KEY"]);
+  assert.deepEqual(recordedResults, []);
+});
+
+test("communications worker never sends outbound email through Gmail", async () => {
+  const recordedResults = [];
+  const result = await processQueuedCommunicationActions({
+    config: {
+      googleReady: true,
+      resendReady: true,
+      maxActions: 10
+    },
+    resendProvider: {
+      async sendEmail() {
+        throw new Error("Resend should not handle Gmail-provider actions.");
+      }
+    },
+    repository: {
+      async enqueueDueNoShowFollowUps() {
+        return [];
+      },
+      async listPendingIntegrationActions() {
+        return [
+          {
+            idempotency_key: "legacy-gmail-action",
+            provider: "gmail",
+            action_type: "send_email",
+            request_payload: {
+              recipient: "parent@example.com",
+              subject: "Subject",
+              body: "Body"
+            }
+          }
+        ];
+      },
+      async recordActionResult(row) {
+        recordedResults.push(row);
+      }
+    },
+    logger: quietLogger()
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.processed, 1);
+  assert.equal(result.skipped, 1);
+  assert.deepEqual(recordedResults, [
+    {
+      idempotencyKey: "legacy-gmail-action",
+      status: "skipped",
+      externalId: null,
+      errorMessage: "Gmail outbound email is disabled; email actions must use Resend.",
+      responsePayload: {}
+    }
+  ]);
 });
 
 function quietLogger() {

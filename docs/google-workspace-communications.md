@@ -8,11 +8,11 @@ Outbound communications foundation:
 
 - `communication_templates` stores reusable message templates.
 - `communications` stores message snapshots, recipients, sender, source, delivery status, provider IDs, and errors.
-- `communication_integration_actions` stores idempotent provider actions such as Gmail send and Google Calendar event creation.
+- `communication_integration_actions` stores idempotent provider actions such as Resend email send and Google Calendar event creation.
 - `communication_automation_settings` stores tenant-aware automation values, beginning with `no_show_follow_up_delay_hours`.
 - `confirm_trial_lesson_mvp` updates the final trial date/time, marks the Trial Lesson as booked, queues confirmation email, and records the Calendar action.
 - `enqueue_due_no_show_follow_ups` is service-role only and queues due no-show follow-up emails.
-- `communications-dispatch` is the Supabase Edge Function boundary for live Gmail and Google Calendar execution.
+- `communications-dispatch` is the Supabase Edge Function boundary for live Resend email sending and Google Calendar execution.
 
 Inbound Trial Booking foundation:
 
@@ -40,16 +40,15 @@ GMAIL_REFRESH_TOKEN
 GMAIL_SOURCE_MAILBOX
 ```
 
-`GMAIL_REFRESH_TOKEN` is the shared refresh-token secret used by Gmail read and send workflows.
+`GMAIL_REFRESH_TOKEN` is used by Gmail read workflows.
 
-Current Gmail scopes required:
+Current Gmail scope required:
 
 ```text
 https://www.googleapis.com/auth/gmail.readonly
-https://www.googleapis.com/auth/gmail.send
 ```
 
-If the existing token only has read access, reauthorize the existing OAuth client for the Bee School mailbox with:
+If the existing token needs to be refreshed, reauthorize the existing OAuth client for the Bee School mailbox with:
 
 ```text
 npm run gmail:reauthorize
@@ -76,9 +75,15 @@ GMAIL_POLL_CRON_SECRET
 TRIAL_BOOKING_CRON_ALERT_EMAIL
 GOOGLE_CALENDAR_ID
 GOOGLE_CALENDAR_TIME_ZONE
+RESEND_API_KEY
+BEE_SCHOOL_RESEND_API_KEY
+BEE_SCHOOL_EMAIL_FROM
+AI_EIGO_INVITATION_EMAIL_FROM
 COMMUNICATIONS_CRON_SECRET
 COMMUNICATIONS_MAX_ACTIONS
 ```
+
+Normal Bee School Office outbound emails use `BEE_SCHOOL_RESEND_API_KEY` and `BEE_SCHOOL_EMAIL_FROM`. AI-EIGO invitation emails use `RESEND_API_KEY` and `AI_EIGO_INVITATION_EMAIL_FROM`; do not reuse one sender identity or API key for both products.
 
 Only secret names are documented here. Secret values must remain in Supabase or another approved secret store.
 
@@ -100,11 +105,11 @@ Outbound provider actions use stable idempotency keys:
 - `trial_lesson:<trial_lesson_id>:trial_lesson_confirmation_email`
 - `trial_lesson:<trial_lesson_id>:google_calendar_event`
 - `trial_lesson:<trial_lesson_id>:no_show_follow_up_email`
-- `communication:<communication_id>:gmail_send`
+- `communication:<communication_id>:resend_send`
 
 Inbound Trial Booking ingestion uses the Gmail message ID plus source mailbox. Gmail thread ID is preserved for audit context but is not the idempotency key.
 
-Retries must update or skip existing work and must not create duplicate Gmail sends, Calendar events, or pending Trial Booking imports.
+Retries must update or skip existing work and must not create duplicate Resend sends, Calendar events, or pending Trial Booking imports.
 
 ## Deferred
 

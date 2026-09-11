@@ -44,8 +44,10 @@ import {
   changeStudentQuestionDate,
   createStudentQuestion,
   deleteStudentQuestion,
+  fetchStudentBankDetails,
   fetchStudentBilling,
   fetchStudentCommunications,
+  fetchStudentFinance,
   fetchStudentProfile,
   fetchStudentQuestions,
   markStudentQuestionDone,
@@ -53,11 +55,21 @@ import {
 } from "@/lib/data";
 import {
   canCreateStudents,
+  canEditStudentFinance,
   canManageAiEigoInvitations,
   canManageBilling,
   canManageCommunications,
-  canManageStudentQuestions
+  canManageStudentQuestions,
+  canViewStudentFinance
 } from "@/lib/roles";
+import {
+  formatMaskedAccountNumber,
+  formatMonthlyFeeYen,
+  formatStudentBankAccountType,
+  formatStudentFinanceValue,
+  hasStudentFinanceData,
+  studentFinanceNotSet
+} from "@/lib/student-finance";
 import {
   createStudentQuestionForm,
   getStudentQuestionDisplayStatus,
@@ -94,9 +106,17 @@ function StudentProfileContent() {
   const [questionDateValue, setQuestionDateValue] = useState("");
   const [questionDeleteTarget, setQuestionDeleteTarget] = useState(null);
   const [questionDeleteError, setQuestionDeleteError] = useState("");
+  const [bankDetailsState, setBankDetailsState] = useState({
+    bankDetails: null,
+    error: "",
+    loading: false,
+    open: false
+  });
   const [state, setState] = useState({
     billing: { charges: [], payments: [], refunds: [], summary: [] },
     billingError: "",
+    finance: null,
+    financeError: "",
     communicationError: "",
     communications: [],
     questionError: "",
@@ -115,6 +135,8 @@ function StudentProfileContent() {
         setState({
           billing: { charges: [], payments: [], refunds: [], summary: [] },
           billingError: "",
+          finance: null,
+          financeError: "",
           communicationError: "",
           communications: [],
           questionError: "",
@@ -128,13 +150,15 @@ function StudentProfileContent() {
 
       setState((current) => ({ ...current, loading: true }));
       const mayLoadBilling = canManageBilling(profile);
+      const mayLoadFinance = canViewStudentFinance(profile);
       const mayLoadQuestions = canManageStudentQuestions(profile);
-      const [{ data, error }, communicationsResult, billingResult, questionsResult] = await Promise.all([
+      const [{ data, error }, communicationsResult, billingResult, financeResult, questionsResult] = await Promise.all([
         fetchStudentProfile(supabase, studentId),
         canManageCommunications(profile) ? fetchStudentCommunications(supabase, studentId) : { data: [], error: null },
         mayLoadBilling
           ? fetchStudentBilling(supabase, studentId)
           : { data: { charges: [], payments: [], refunds: [], summary: [] }, error: null },
+        mayLoadFinance ? fetchStudentFinance(supabase, studentId) : { data: null, error: null },
         mayLoadQuestions ? fetchStudentQuestions(supabase, { studentId, status: "open" }) : { data: [], error: null }
       ]);
       if (!active) return;
@@ -142,6 +166,8 @@ function StudentProfileContent() {
       setState({
         billing: billingResult.data || { charges: [], payments: [], refunds: [], summary: [] },
         billingError: billingResult.error ? billingResult.error.message : "",
+        finance: financeResult.data || null,
+        financeError: financeResult.error ? financeResult.error.message : "",
         communicationError: communicationsResult.error ? communicationsResult.error.message : "",
         communications: communicationsResult.data || [],
         questionError: questionsResult.error ? questionsResult.error.message : "",
@@ -158,6 +184,43 @@ function StudentProfileContent() {
       active = false;
     };
   }, [profile, session, studentId]);
+
+  function handleCloseBankDetails() {
+    setBankDetailsState({
+      bankDetails: null,
+      error: "",
+      loading: false,
+      open: false
+    });
+  }
+
+  async function handleViewBankDetails() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session || !state.student) {
+      setBankDetailsState({
+        bankDetails: null,
+        error: "You must be signed in before viewing bank details.",
+        loading: false,
+        open: true
+      });
+      return;
+    }
+
+    setBankDetailsState({
+      bankDetails: null,
+      error: "",
+      loading: true,
+      open: true
+    });
+
+    const { data, error } = await fetchStudentBankDetails(supabase, state.student.id);
+    setBankDetailsState({
+      bankDetails: data || null,
+      error: error ? error.message : "",
+      loading: false,
+      open: true
+    });
+  }
 
   async function handleEmailSent() {
     setComposerOpen(false);
@@ -392,6 +455,8 @@ function StudentProfileContent() {
   const mayCommunicate = canManageCommunications(profile);
   const mayManageQuestions = canManageStudentQuestions(profile);
   const mayManageAiEigo = canManageAiEigoInvitations(profile);
+  const mayShowFinance = canViewStudentFinance(profile);
+  const mayEditFinance = canEditStudentFinance(profile);
 
   return (
     <>
@@ -439,6 +504,15 @@ function StudentProfileContent() {
           error={questionDeleteError}
           onCancel={handleCancelDeleteQuestion}
           onConfirm={handleConfirmDeleteQuestion}
+        />
+      ) : null}
+
+      {bankDetailsState.open ? (
+        <StudentBankDetailsDialog
+          bankDetails={bankDetailsState.bankDetails}
+          error={bankDetailsState.error}
+          loading={bankDetailsState.loading}
+          onClose={handleCloseBankDetails}
         />
       ) : null}
 
@@ -551,6 +625,16 @@ function StudentProfileContent() {
               student={student}
             />
           </DataSurface>
+        ) : null}
+
+        {mayShowFinance ? (
+          <StudentFinanceSection
+            error={state.financeError}
+            finance={state.finance}
+            mayEdit={mayEditFinance}
+            onViewBankDetails={handleViewBankDetails}
+            student={student}
+          />
         ) : null}
 
         <DataSurface>
@@ -679,6 +763,128 @@ function StudentProfileContent() {
         </DataSurface>
       </div>
     </>
+  );
+}
+
+function StudentFinanceSection({ error, finance, mayEdit, onViewBankDetails, student }) {
+  const hasFinance = hasStudentFinanceData(finance);
+  const bankConfigured = finance?.has_bank_account;
+  const bankLine = bankConfigured
+    ? [
+        formatStudentFinanceValue(finance.bank_name),
+        formatStudentFinanceValue(finance.branch_name),
+        `${formatStudentBankAccountType(finance.account_type)} \u00b7 ${formatMaskedAccountNumber(finance.account_number_last4)}`
+      ]
+    : ["Not configured"];
+
+  return (
+    <DataSurface>
+      <SurfaceHeader
+        actions={
+          <div className="table-actions">
+            {finance?.can_view_full_bank_details && bankConfigured ? (
+              <button className="secondary-button" onClick={onViewBankDetails} type="button">
+                View bank details
+              </button>
+            ) : null}
+            {mayEdit && finance?.can_edit_finance ? (
+              <Link className="secondary-button" href={`/students/finance/edit/?id=${student.id}`}>
+                {hasFinance ? "Edit" : "Add finance details"}
+              </Link>
+            ) : null}
+          </div>
+        }
+      >
+        <h2>Finance</h2>
+      </SurfaceHeader>
+      {error ? <p className="inline-alert">{error}</p> : null}
+      <dl className="detail-list finance-detail-list">
+        <div>
+          <dt>Monthly fee</dt>
+          <dd>{formatMonthlyFeeYen(finance?.monthly_fee_yen)}</dd>
+        </div>
+        <div>
+          <dt>Billing address</dt>
+          <dd className="preserve-lines">{formatStudentFinanceValue(finance?.postal_address)}</dd>
+        </div>
+        <div>
+          <dt>Bank account</dt>
+          <dd>
+            <span className="finance-bank-summary">
+              {bankLine.map((line, index) => (
+                <span key={`${line}-${index}`}>{line}</span>
+              ))}
+            </span>
+          </dd>
+        </div>
+      </dl>
+    </DataSurface>
+  );
+}
+
+function StudentBankDetailsDialog({ bankDetails, error, loading, onClose }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-labelledby="student-bank-details-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal student-bank-details-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="student-bank-details-title">Bank Details</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          {loading ? <p>Loading bank details...</p> : null}
+          {error ? <p className="inline-alert">{error}</p> : null}
+          {!loading && !error ? (
+            bankDetails ? (
+              <dl className="detail-list finance-modal-detail-list">
+                <div>
+                  <dt>Bank name</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.bank_name)}</dd>
+                </div>
+                <div>
+                  <dt>Bank code</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.bank_code)}</dd>
+                </div>
+                <div>
+                  <dt>Branch name</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.branch_name)}</dd>
+                </div>
+                <div>
+                  <dt>Branch Yomigana</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.branch_name_yomigana)}</dd>
+                </div>
+                <div>
+                  <dt>Branch code</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.branch_code)}</dd>
+                </div>
+                <div>
+                  <dt>Account type</dt>
+                  <dd>{formatStudentBankAccountType(bankDetails.account_type)}</dd>
+                </div>
+                <div>
+                  <dt>Account number</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.account_number)}</dd>
+                </div>
+                <div>
+                  <dt>Account holder Katakana</dt>
+                  <dd>{formatStudentFinanceValue(bankDetails.account_holder_katakana)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p>{studentFinanceNotSet}</p>
+            )
+          ) : null}
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

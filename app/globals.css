@@ -1025,6 +1025,32 @@ dd {
   min-width: 0;
 }
 
+.finance-detail-list dd {
+  overflow-wrap: anywhere;
+}
+
+.finance-bank-summary {
+  display: grid;
+  gap: 3px;
+}
+
+.preserve-lines {
+  white-space: pre-wrap;
+}
+
+.student-bank-details-modal {
+  max-width: 520px;
+}
+
+.finance-modal-detail-list {
+  padding: 0;
+}
+
+.finance-modal-detail-list div {
+  grid-template-columns: minmax(130px, 0.5fr) minmax(0, 1fr);
+  padding: 11px 0;
+}
+
 .stack-list {
   display: grid;
   gap: 10px;

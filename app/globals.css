@@ -437,6 +437,12 @@ textarea:focus {
   padding: 30px 28px 54px;
 }
 
+.content.content-wide {
+  margin: 0;
+  max-width: none;
+  width: 100%;
+}
+
 .page-header {
   align-items: end;
   display: flex;
@@ -877,6 +883,63 @@ tr:last-child td {
   background: #f4f5f6;
   border-color: #d8dde1;
   color: #59636e;
+}
+
+.pending-imports-table th.pending-import-status-column,
+.pending-imports-table td.pending-import-status-cell {
+  max-width: 52px;
+  min-width: 52px;
+  padding-left: 6px;
+  padding-right: 6px;
+  text-align: center;
+  width: 52px;
+}
+
+.pending-imports-table th.pending-import-action-column,
+.pending-imports-table td.pending-import-action-cell {
+  max-width: 58px;
+  min-width: 58px;
+  padding-left: 6px;
+  padding-right: 6px;
+  text-align: center;
+  width: 58px;
+}
+
+.pending-import-status-icon {
+  align-items: center;
+  border: 1px solid #d8e0e8;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.pending-import-status-icon.success {
+  background: #e7f6ee;
+  border-color: #b9e2cb;
+  color: #1f6d48;
+}
+
+.pending-import-status-icon.warning {
+  background: #fff7df;
+  border-color: #efd287;
+  color: #775914;
+}
+
+.pending-import-status-icon.muted {
+  background: #f4f5f6;
+  border-color: #d8dde1;
+  color: #59636e;
+}
+
+.pending-import-status-icon.neutral {
+  background: #edf2f7;
+  color: #3d4a57;
+}
+
+.pending-import-action-link {
+  margin: 0 auto;
 }
 
 .toolbar {

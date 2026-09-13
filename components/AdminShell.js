@@ -20,6 +20,7 @@ export function AdminShell({ children }) {
   const highestRole = getHighestRole(profile);
   const mayManageStudentQuestions = canManageStudentQuestions(profile);
   const mayManageTrialLessons = canManageTrialLessons(profile);
+  const isTrialLessonsListPage = pathname === "/trial-lessons" || pathname === "/trial-lessons/";
   const [pendingTrialBookingCount, setPendingTrialBookingCount] = useState(0);
   const [studentQuestionCount, setStudentQuestionCount] = useState(0);
 
@@ -149,7 +150,7 @@ export function AdminShell({ children }) {
             Log out
           </button>
         </header>
-        <div className="content">{children}</div>
+        <div className={isTrialLessonsListPage ? "content content-wide" : "content"}>{children}</div>
       </main>
     </div>
   );

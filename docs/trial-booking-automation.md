@@ -189,11 +189,13 @@ The health RPC exposes only safe status metadata such as last run, last success,
 
 ## External Critical Alerting
 
-External email alerting is implemented for critical Gmail Trial Booking Cron incidents only. It reuses the server-side Gmail sender infrastructure from the communications worker.
+External email alerting is implemented for critical Gmail Trial Booking Cron incidents only. It reuses the server-side Bee School Resend sender infrastructure from the communications worker so a Gmail OAuth outage cannot block monitoring email delivery.
 
 Configuration:
 
 - `TRIAL_BOOKING_CRON_ALERT_EMAIL`: comma-separated alert recipient email addresses, stored as a Supabase Edge Function secret.
+- `BEE_SCHOOL_RESEND_API_KEY`: server-side Resend key for Bee School Office operational email.
+- `BEE_SCHOOL_EMAIL_FROM`: verified Bee School sender identity used for operational email.
 
 Behavior:
 
@@ -205,6 +207,6 @@ Behavior:
 
 Persistent incident state is stored in `gmail_trial_booking_cron_incidents`. The alert RPCs are service-role only and expose no browser-callable email trigger.
 
-Alert bodies include safe operational metadata only: status, detection/recovery time, last success, minutes since last success, latest safe Cron/function result, HTTP status, and recent failure count. They must not include booking content, customer data, Gmail OAuth values, Cron secrets, service-role keys, authorization headers, Vault values, or raw email bodies.
+Critical alert bodies include safe operational metadata only: last successful Cron run, minutes since last success, latest safe result/status, and detection timestamp. Recovery bodies include recovery timestamp, latest successful run, and incident duration when available. They must not include booking content, customer data, Gmail OAuth values, Cron secrets, service-role keys, authorization headers, Vault values, or raw email bodies.
 
 SMS, Slack, LINE, and push alerting are still deferred.

@@ -244,6 +244,14 @@ test("Resend sender posts server-side email payloads and records the provider me
   assert.equal(result.externalId, "resend-message-1");
   assert.deepEqual(result.responsePayload, { id: "resend-message-1" });
   assert.equal(result.status, "succeeded");
+
+  await client.sendEmail({
+    recipients: ["ops@example.com", "owner@example.jp"],
+    subject: "Cron alert",
+    body: "Safe monitoring summary"
+  });
+  const alertRequestBody = JSON.parse(requests[1].options.body);
+  assert.deepEqual(alertRequestBody.to, ["ops@example.com", "owner@example.jp"]);
 });
 
 test("Resend sender failures do not report success", async () => {

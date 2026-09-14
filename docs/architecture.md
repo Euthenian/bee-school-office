@@ -234,6 +234,7 @@ Verified in the repository and, for recent feature tables, by non-mutating remot
 
 - Supabase Edge Function secrets for Gmail, Resend, service-role access, and Cron shared secrets.
 - `TRIAL_BOOKING_CRON_ALERT_EMAIL` for Gmail Trial Booking Cron critical/recovery email recipients.
+- Bee School Resend sender secrets for Gmail Trial Booking Cron critical/recovery alerts.
 - Supabase Cron job `bee-school-gmail-trial-booking-poll` with cadence `*/15 * * * *`.
 - Gmail OAuth mailbox authorization.
 - Sakura static-site deployment.

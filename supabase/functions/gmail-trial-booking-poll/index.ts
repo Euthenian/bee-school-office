@@ -4,7 +4,7 @@ import {
   pollGmailTrialBookings,
   readGmailTrialBookingWorkerConfig,
 } from "../../../lib/gmail-trial-booking-worker.js";
-import { createGmailSenderClient } from "../../../lib/communications-worker.js";
+import { createResendSenderClient } from "../../../lib/communications-worker.js";
 import {
   createSupabaseRestCronAlertRepository,
   processGmailTrialBookingCronAlert,
@@ -86,12 +86,12 @@ async function evaluateCronAlerting(pollResult: Record<string, unknown>) {
   try {
     const summary = await processGmailTrialBookingCronAlert({
       config,
-      emailProvider: createGmailSenderClient(
+      emailProvider: createResendSenderClient(
         {
-          clientId: config.gmailClientId,
-          clientSecret: config.gmailClientSecret,
-          refreshToken: config.gmailRefreshToken,
-          senderEmail: config.gmailSenderEmail,
+          apiKey: config.beeSchoolResendApiKey,
+          apiKeySecretName: "BEE_SCHOOL_RESEND_API_KEY",
+          from: config.beeSchoolEmailFrom,
+          fromSecretName: "BEE_SCHOOL_EMAIL_FROM",
         },
         fetch,
       ),

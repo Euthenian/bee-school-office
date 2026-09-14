@@ -96,7 +96,7 @@ Supabase Cron should invoke Edge Functions, not the static Next.js app and not S
 
 The scheduled job must call only the intended Edge Function. Cron must not create live Trial Lessons directly; Gmail polling stops at pending imports.
 
-Gmail Trial Booking Cron critical/recovery email alerting reuses the same server-side Gmail sender infrastructure. Recipients come only from the Supabase Edge Function secret `TRIAL_BOOKING_CRON_ALERT_EMAIL`; the browser must never supply or see recipient configuration.
+Gmail Trial Booking Cron critical/recovery email alerting reuses the server-side Bee School Resend sender infrastructure, not Gmail. Recipients come only from the Supabase Edge Function secret `TRIAL_BOOKING_CRON_ALERT_EMAIL`; the browser must never supply or see recipient configuration.
 
 ## Idempotency
 

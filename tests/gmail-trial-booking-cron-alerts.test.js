@@ -26,6 +26,8 @@ const alertHelperSource = readFileSync(
 const readyConfig = {
   alertRecipientHeader: "ops@example.com",
   alertRecipients: ["ops@example.com"],
+  beeSchoolEmailFrom: "Bee School <alerts@beeschool.jp>",
+  beeSchoolResendApiKey: "resend-key",
   ready: true
 };
 
@@ -60,10 +62,8 @@ test("alert recipient config is server-side and comma separated", () => {
   const values = {
     SUPABASE_URL: "https://example.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "service-role",
-    GMAIL_CLIENT_ID: "client-id",
-    GMAIL_CLIENT_SECRET: "client-secret",
-    GMAIL_REFRESH_TOKEN: "refresh-token",
-    GMAIL_SOURCE_MAILBOX: "bee@example.com",
+    BEE_SCHOOL_RESEND_API_KEY: "resend-key",
+    BEE_SCHOOL_EMAIL_FROM: "Bee School <alerts@beeschool.jp>",
     TRIAL_BOOKING_CRON_ALERT_EMAIL: " Ops@Example.com, ops@example.com, owner@example.jp "
   };
   const result = readGmailTrialBookingCronAlertConfig((name) => values[name]);
@@ -71,6 +71,8 @@ test("alert recipient config is server-side and comma separated", () => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.config.alertRecipients, ["ops@example.com", "owner@example.jp"]);
   assert.equal(result.config.alertRecipientHeader, "ops@example.com, owner@example.jp");
+  assert.equal(result.config.beeSchoolResendApiKey, "resend-key");
+  assert.equal(result.config.beeSchoolEmailFrom, "Bee School <alerts@beeschool.jp>");
   assert.deepEqual(parseCronAlertRecipients("bad,one@example.com, two@example.jp "), [
     "one@example.com",
     "two@example.jp"
@@ -146,7 +148,14 @@ test("critical incident sends one safe alert and repeated critical checks do not
   assert.equal(second.sent, false);
   assert.equal(emails.length, 1);
   assert.equal(emails[0].subject, "[Bee School Office] Trial Booking Import CRITICAL");
+  assert.deepEqual(emails[0].recipients, ["ops@example.com"]);
   assert.match(emails[0].body, /Trial Booking Gmail import is CRITICAL/);
+  assert.match(emails[0].body, /Detected at:/);
+  assert.match(emails[0].body, /Last successful run:/);
+  assert.match(emails[0].body, /Minutes since last success:/);
+  assert.match(emails[0].body, /Latest safe result:/);
+  assert.match(emails[0].body, /Latest safe status:/);
+  assert.doesNotMatch(emails[0].body, /HTTP status|Recent failure count|Last run:/);
   assertSafeAlertBody(emails[0].body);
   assert.deepEqual(repository.records.map((record) => record.alertType), ["critical"]);
 });
@@ -178,7 +187,10 @@ test("recovery from a critical incident sends one recovery email only", async ()
   assert.equal(emails.length, 1);
   assert.equal(emails[0].subject, "[Bee School Office] Trial Booking Import Recovered");
   assert.match(emails[0].body, /Trial Booking Gmail import has recovered/);
+  assert.match(emails[0].body, /Recovered at:/);
+  assert.match(emails[0].body, /Latest successful run:/);
   assert.match(emails[0].body, /Incident duration minutes: 60/);
+  assert.doesNotMatch(emails[0].body, /Incident started at|Latest safe result/);
   assertSafeAlertBody(emails[0].body);
   assert.deepEqual(repository.records.map((record) => record.alertType), ["recovery"]);
 });
@@ -241,7 +253,10 @@ test("critical and recovery email builders do not include secrets or booking dat
 
 test("poll Edge Function integrates alerting without creating live Trial Lesson data", () => {
   assert.match(edgeFunctionSource, /processGmailTrialBookingCronAlert/);
-  assert.match(edgeFunctionSource, /createGmailSenderClient/);
+  assert.match(edgeFunctionSource, /createResendSenderClient/);
+  assert.match(edgeFunctionSource, /BEE_SCHOOL_RESEND_API_KEY/);
+  assert.match(edgeFunctionSource, /BEE_SCHOOL_EMAIL_FROM/);
+  assert.doesNotMatch(edgeFunctionSource, /createGmailSenderClient/);
   assert.match(edgeFunctionSource, /TRIAL_BOOKING_CRON_ALERT_EMAIL|readGmailTrialBookingCronAlertConfig/);
   assert.match(edgeFunctionSource, /x-gmail-poll-secret/);
   assert.doesNotMatch(edgeFunctionSource, /create_trial_lesson_mvp/);
@@ -300,7 +315,7 @@ function createFakeEmailProvider(emails) {
   return {
     async sendEmail(email) {
       emails.push(email);
-      return { externalId: `gmail-${emails.length}`, status: "succeeded" };
+      return { externalId: `resend-${emails.length}`, status: "succeeded" };
     }
   };
 }

@@ -6,6 +6,8 @@ import {
   defaultTrialLessonColumnFilters,
   defaultTrialLessonSort,
   filterAndSortTrialLessons,
+  formatUpcomingTrialLessonDate,
+  getNearestUpcomingTrialLesson,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
   resetTrialLessonTableFilters
@@ -118,6 +120,22 @@ test("trial lesson date and time sorting keep null values last", () => {
     "older-late",
     "missing"
   ]);
+});
+
+test("nearest upcoming trial lesson pill uses the next scheduled trial date and time", () => {
+  const rows = [
+    trialLesson("past", { trial_date: "2026-09-13", trial_time: "18:00:00" }),
+    trialLesson("sep-20", { trial_date: "2026-09-20", trial_time: "09:00:00" }),
+    trialLesson("sep-16-later", { trial_date: "2026-09-16", trial_time: "18:00:00" }),
+    trialLesson("sep-16-earlier", { trial_date: "2026-09-16", trial_time: "10:00:00" })
+  ];
+  const nearest = getNearestUpcomingTrialLesson(rows, "2026-09-14");
+
+  assert.equal(nearest.id, "sep-16-earlier");
+  assert.equal(formatUpcomingTrialLessonDate(nearest), "Sep 16");
+  assert.equal(getNearestUpcomingTrialLesson([trialLesson("past", { trial_date: "2026-09-13" })], "2026-09-14"), null);
+  assert.match(trialLessonsPage, /getNearestUpcomingTrialLesson\(state\.trialLessons, todayKey\)/);
+  assert.match(trialLessonsPage, /Upcoming Trial Lesson &middot;/);
 });
 
 test("trial lesson name sorting and contains filter use displayed prospect and participant names", () => {

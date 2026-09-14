@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { formatLessonTime } from "@/lib/class-details";
-import { fetchPendingTrialBookingImports } from "@/lib/data";
+import { dismissPendingTrialBookingImport, fetchPendingTrialBookingImports } from "@/lib/data";
 import { formatDate, formatDateTime, humanize } from "@/lib/format";
 import { canManageTrialLessons } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -21,6 +21,8 @@ const reviewStatusOptions = [
 
 export default function PendingTrialBookingImportsPage() {
   const { profile, session } = useAuth();
+  const [discardTarget, setDiscardTarget] = useState(null);
+  const [discardingId, setDiscardingId] = useState("");
   const [search, setSearch] = useState("");
   const [reviewStatus, setReviewStatus] = useState("pending_review");
   const [state, setState] = useState({ loading: true, error: "", imports: [] });
@@ -69,6 +71,36 @@ export default function PendingTrialBookingImportsPage() {
     );
   }
 
+  async function handleConfirmDiscard() {
+    if (!discardTarget) return;
+
+    const target = discardTarget;
+    const supabase = getSupabaseBrowserClient();
+    setDiscardTarget(null);
+
+    if (!supabase || !session) {
+      setState((current) => ({ ...current, error: "You must be signed in before discarding a pending booking." }));
+      return;
+    }
+
+    setDiscardingId(target.id);
+    setState((current) => ({
+      ...current,
+      error: "",
+      imports: current.imports.filter((pendingImport) => pendingImport.id !== target.id)
+    }));
+
+    const { error } = await dismissPendingTrialBookingImport(supabase, target.id);
+    if (error) {
+      setState((current) => ({
+        ...current,
+        error: error.message,
+        imports: [target, ...current.imports]
+      }));
+    }
+    setDiscardingId("");
+  }
+
   return (
     <>
       <PageHeader
@@ -105,6 +137,13 @@ export default function PendingTrialBookingImportsPage() {
       </div>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
+      {discardTarget ? (
+        <DiscardPendingImportDialog
+          booking={discardTarget}
+          onCancel={() => setDiscardTarget(null)}
+          onConfirm={handleConfirmDiscard}
+        />
+      ) : null}
 
       <DataSurface aria-label="Pending imported trial bookings">
         {state.loading ? (
@@ -130,7 +169,12 @@ export default function PendingTrialBookingImportsPage() {
               </thead>
               <tbody>
                 {state.imports.map((pendingImport) => (
-                  <PendingImportRow key={pendingImport.id} pendingImport={pendingImport} />
+                  <PendingImportRow
+                    discarding={discardingId === pendingImport.id}
+                    key={pendingImport.id}
+                    onDiscard={setDiscardTarget}
+                    pendingImport={pendingImport}
+                  />
                 ))}
               </tbody>
             </table>
@@ -143,7 +187,10 @@ export default function PendingTrialBookingImportsPage() {
   );
 }
 
-function PendingImportRow({ pendingImport }) {
+function PendingImportRow({ discarding, onDiscard, pendingImport }) {
+  const canDiscard = pendingImport.review_status === "pending_review";
+  const discardLabel = `Discard pending booking for ${pendingImport.student_name || "unnamed student"}`;
+
   return (
     <tr>
       <td>
@@ -168,16 +215,64 @@ function PendingImportRow({ pendingImport }) {
         <CompactStatusIcon status={pendingImport.review_status} type="review" />
       </td>
       <td className="pending-import-action-cell">
-        <Link
-          aria-label="Review"
-          className="primary-button action-icon-button pending-import-action-link"
-          href={`/trial-lessons/imports/review/?id=${pendingImport.id}`}
-          title="Review"
-        >
-          <PendingImportIcon name="eye" />
-        </Link>
+        <div className="table-actions pending-import-actions">
+          <Link
+            aria-label="Review"
+            className="primary-button action-icon-button pending-import-action-link"
+            href={`/trial-lessons/imports/review/?id=${pendingImport.id}`}
+            title="Review"
+          >
+            <PendingImportIcon name="eye" />
+          </Link>
+          {canDiscard ? (
+            <button
+              aria-label={discardLabel}
+              className="danger-button action-icon-button pending-import-action-link"
+              disabled={discarding}
+              onClick={() => onDiscard(pendingImport)}
+              title="Discard pending booking"
+              type="button"
+            >
+              <PendingImportIcon name="trash" />
+            </button>
+          ) : null}
+        </div>
       </td>
     </tr>
+  );
+}
+
+function DiscardPendingImportDialog({ booking, onCancel, onConfirm }) {
+  const studentName = booking.student_name || "this pending booking";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="discard-pending-booking-description"
+        aria-labelledby="discard-pending-booking-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="discard-pending-booking-title">Discard pending booking?</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          <p id="discard-pending-booking-description">
+            This will remove {studentName} from the Pending Bookings list. It will not delete the original Gmail message,
+            any Trial Lesson, or any student/customer CRM record.
+          </p>
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="danger-button" onClick={onConfirm} type="button">
+            Discard pending booking
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -304,6 +399,26 @@ function PendingImportIcon({ name }) {
         strokeLinejoin="round"
         strokeWidth="2"
       />
+    ),
+    trash: (
+      <>
+        <path
+          d="M4 7h16"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </>
     )
   };
 

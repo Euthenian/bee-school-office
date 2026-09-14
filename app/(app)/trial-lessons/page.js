@@ -39,6 +39,8 @@ import {
   formatParticipantName,
   formatProspectName,
   formatTrialLevel,
+  formatUpcomingTrialLessonDate,
+  getNearestUpcomingTrialLesson,
   getLocalDateKey,
   getPrimaryParticipant,
   hasActiveTrialLessonColumnFilters,
@@ -197,6 +199,10 @@ export default function TrialLessonsPage() {
   const selectedTrialLessons = useMemo(
     () => state.trialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)),
     [state.trialLessons, validSelectedTrialLessonIds]
+  );
+  const nearestUpcomingTrialLesson = useMemo(
+    () => getNearestUpcomingTrialLesson(state.trialLessons, todayKey),
+    [state.trialLessons, todayKey]
   );
   const selectedTrialLessonCount = validSelectedTrialLessonIds.size;
   const visibleSelectedTrialLessonCount = visibleTrialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)).length;
@@ -477,6 +483,11 @@ export default function TrialLessonsPage() {
         actions={
           mayManage ? (
             <div className="form-actions">
+              {nearestUpcomingTrialLesson ? (
+                <span className="status-badge upcoming-trial-lesson-pill">
+                  Upcoming Trial Lesson &middot; {formatUpcomingTrialLessonDate(nearestUpcomingTrialLesson)}
+                </span>
+              ) : null}
               <Link className="secondary-button" href="/trial-lessons/imports/">
                 Pending bookings {pendingState.loading ? "..." : pendingState.count}
               </Link>

@@ -515,6 +515,10 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+.upcoming-trial-lesson-pill {
+  white-space: nowrap;
+}
+
 .settings-password-actions {
   padding: 0 18px 18px;
 }
@@ -897,12 +901,12 @@ tr:last-child td {
 
 .pending-imports-table th.pending-import-action-column,
 .pending-imports-table td.pending-import-action-cell {
-  max-width: 58px;
-  min-width: 58px;
+  max-width: 90px;
+  min-width: 90px;
   padding-left: 6px;
   padding-right: 6px;
   text-align: center;
-  width: 58px;
+  width: 90px;
 }
 
 .pending-import-status-icon {
@@ -940,6 +944,12 @@ tr:last-child td {
 
 .pending-import-action-link {
   margin: 0 auto;
+}
+
+.pending-import-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+  justify-content: center;
 }
 
 .toolbar {

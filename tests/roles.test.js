@@ -37,6 +37,7 @@ import {
 import {
   buildProspectCandidateMatch,
   buildPendingTrialBookingReviewPatch,
+  dismissPendingTrialBookingImport,
   fetchFinanceDashboardSummary,
   fetchGmailTrialBookingCronHealth,
   normalizeImportedLessonType,
@@ -1079,6 +1080,53 @@ test("trial lessons surface pending booking review and conversion through the at
   assert.match(pendingTrialBookingReviewPage, /Create Trial Lesson/);
   assert.doesNotMatch(pendingTrialBookingsPage, /createTrialLesson|create_trial_lesson_mvp|from\("trial_lessons"\)|from\("prospects"\)/);
   assert.doesNotMatch(pendingTrialBookingReviewPage, /from\("trial_lessons"\)|from\("prospects"\)|from\("prospect_contacts"\)/);
+});
+
+test("pending booking list dismisses one pending import through existing review status", async () => {
+  assert.match(pendingTrialBookingsPage, /dismissPendingTrialBookingImport/);
+  assert.match(pendingTrialBookingsPage, /Discard pending booking\?/);
+  assert.match(pendingTrialBookingsPage, /setDiscardTarget\(null\)/);
+  assert.match(pendingTrialBookingsPage, /imports: current\.imports\.filter\(\(pendingImport\) => pendingImport\.id !== target\.id\)/);
+  assert.match(pendingTrialBookingsPage, /pendingImport\.review_status === "pending_review"/);
+  assert.match(pendingTrialBookingsPage, /It will not delete the original Gmail message/);
+  assert.doesNotMatch(pendingTrialBookingsPage, /deleteTrialLesson|delete_trial_lesson_mvp|from\("trial_lessons"\)|from\("prospects"\)/);
+
+  const calls = [];
+  const query = {
+    eq(column, value) {
+      calls.push({ column, method: "eq", value });
+      return this;
+    },
+    async maybeSingle() {
+      calls.push({ method: "maybeSingle" });
+      return { data: { id: "pending-1", review_status: "dismissed" }, error: null };
+    },
+    select(selection) {
+      calls.push({ method: "select", selection });
+      return this;
+    },
+    update(patch) {
+      calls.push({ method: "update", patch });
+      return this;
+    }
+  };
+  const supabase = {
+    from(table) {
+      calls.push({ method: "from", table });
+      return query;
+    }
+  };
+
+  const result = await dismissPendingTrialBookingImport(supabase, "pending-1");
+
+  assert.deepEqual(result.patch, { review_status: "dismissed" });
+  assert.deepEqual(calls.slice(0, 4), [
+    { method: "from", table: "pending_trial_booking_imports" },
+    { method: "update", patch: { review_status: "dismissed" } },
+    { column: "id", method: "eq", value: "pending-1" },
+    { column: "review_status", method: "eq", value: "pending_review" }
+  ]);
+  assert.equal(calls.some((call) => call.method === "delete"), false);
 });
 
 test("sidebar trial lessons badge reuses the pending review count", () => {

@@ -121,6 +121,7 @@ import {
   serializeNoteRows,
   validateGuardianRows
 } from "../lib/student-form.js";
+import { studentStatuses } from "../lib/students.js";
 import { serializeParticipants, trialLessonStatuses } from "../lib/trial-lessons.js";
 
 const trialLessonFoundationSql = readFileSync(
@@ -339,9 +340,15 @@ test("students list supports all, active, and inactive status filters", () => {
 
   assert.match(studentsPage, /studentStatusFilterOptions/);
   assert.match(studentsPage, /value: "all", label: "All"/);
-  assert.match(studentsPage, /value: "active", label: "Active"/);
-  assert.match(studentsPage, /value: "inactive", label: "Inactive"/);
-  assert.match(studentsPage, /fetchStudents\(supabase, \{ search, status: statusFilter \}\)/);
+  assert.deepEqual(
+    studentStatuses.map((status) => status.value),
+    ["active", "pending", "paused", "withdrawn", "graduated", "inactive"]
+  );
+  assert.match(studentsPage, /studentStatuses/);
+  assert.match(studentsPage, /filterStudents\(state\.students, filters, todayKey\)/);
+  assert.match(studentsPage, /All schools/);
+  assert.match(studentsPage, /All courses\/classes/);
+  assert.match(studentsPage, /Clear all filters/);
   assert.match(dataSource, /filters\.status && filters\.status !== "all"/);
   assert.match(dataSource, /\.eq\("status", filters\.status\)/);
   assert.match(dataSource, /legacy_customer_id\.ilike/);

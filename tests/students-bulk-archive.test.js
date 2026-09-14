@@ -23,9 +23,27 @@ test("student bulk archive UI is admin-only and clearly preserves linked history
   assert.match(studentsPage, /onClick=\{onConfirm\}/);
 });
 
+test("student bulk archive cancel only closes the dialog", () => {
+  const closeBulkArchiveDialog = extractFunction("closeBulkArchiveDialog");
+
+  assert.match(closeBulkArchiveDialog, /if \(bulkArchiveSubmitting\) return/);
+  assert.match(closeBulkArchiveDialog, /setBulkArchiveError\(""\)/);
+  assert.match(closeBulkArchiveDialog, /setBulkArchiveDialogOpen\(false\)/);
+  assert.doesNotMatch(closeBulkArchiveDialog, /bulkUpdateStudentStatus|setState|clearSelection|status: "inactive"/);
+});
+
 test("student bulk archive uses the existing bulk status mutation with inactive", () => {
-  assert.match(studentsPage, /bulkUpdateStudentStatus\(/);
-  assert.match(studentsPage, /status: "inactive"/);
+  const handleBulkArchiveConfirm = extractFunction("handleBulkArchiveConfirm");
+
+  assert.match(handleBulkArchiveConfirm, /const studentIds = \[\.\.\.visibleSelectedStudentIds\]/);
+  assert.match(handleBulkArchiveConfirm, /bulkUpdateStudentStatus\(/);
+  assert.match(handleBulkArchiveConfirm, /status: "inactive"/);
+  assert.match(handleBulkArchiveConfirm, /studentIds/);
+  assert.match(handleBulkArchiveConfirm, /setState\(\(current\) => \(\{/);
+  assert.match(handleBulkArchiveConfirm, /students: current\.students\.map/);
+  assert.match(handleBulkArchiveConfirm, /clearSelection\(\)/);
+  assert.match(handleBulkArchiveConfirm, /setBulkArchiveDialogOpen\(false\)/);
+  assert.doesNotMatch(handleBulkArchiveConfirm, /fetchStudents|createDefaultStudentFilters|setFilters/);
   assert.doesNotMatch(studentsPage, /from\("students"\)\s*\.delete|delete_student|bulkDelete/i);
   assert.doesNotMatch(dataSource, /bulkArchiveStudents|delete_student|from\("students"\)\s*\.delete/i);
 });
@@ -69,9 +87,25 @@ test("archive affects only explicitly selected student ids and leaves linked tab
   );
   assert.equal(
     supabase.calls.some((call) =>
-      ["student_enrollments", "student_notes", "student_charges", "student_payments", "communications", "ai_eigo_student_links"].includes(
-        call.table
-      )
+      [
+        "billing",
+        "communications",
+        "gmail_imports",
+        "legacy_student_import_staging",
+        "payment_history",
+        "questions",
+        "student_billing_profiles",
+        "student_charges",
+        "student_enrollments",
+        "student_finance_profiles",
+        "student_notes",
+        "student_payments",
+        "student_questions",
+        "student_reminders",
+        "ai_eigo_student_invitations",
+        "ai_eigo_student_links",
+        "trial_lessons"
+      ].includes(call.table)
     ),
     false
   );
@@ -131,4 +165,26 @@ function createBulkStatusSupabase(options = {}) {
       };
     }
   };
+}
+
+function extractFunction(name) {
+  const start = studentsPage.indexOf(`function ${name}`);
+  assert.notEqual(start, -1, `${name} should exist`);
+
+  let depth = 0;
+  let started = false;
+  for (let index = start; index < studentsPage.length; index += 1) {
+    const char = studentsPage[index];
+    if (char === "{") {
+      depth += 1;
+      started = true;
+    } else if (char === "}") {
+      depth -= 1;
+      if (started && depth === 0) {
+        return studentsPage.slice(start, index + 1);
+      }
+    }
+  }
+
+  assert.fail(`${name} should have a complete function body`);
 }

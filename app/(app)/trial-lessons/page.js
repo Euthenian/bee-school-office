@@ -484,8 +484,13 @@ export default function TrialLessonsPage() {
           mayManage ? (
             <div className="form-actions">
               {nearestUpcomingTrialLesson ? (
-                <span className="status-badge upcoming-trial-lesson-pill">
-                  Upcoming Trial Lesson &middot; {formatUpcomingTrialLessonDate(nearestUpcomingTrialLesson)}
+                <span className="upcoming-trial-lesson-indicator">
+                  <span aria-hidden="true" className="upcoming-trial-lesson-star">
+                    ★
+                  </span>
+                  <span className="status-badge upcoming-trial-lesson-pill">
+                    Upcoming Trial Lesson &middot; {formatUpcomingTrialLessonDate(nearestUpcomingTrialLesson)}
+                  </span>
                 </span>
               ) : null}
               <Link className="secondary-button" href="/trial-lessons/imports/">

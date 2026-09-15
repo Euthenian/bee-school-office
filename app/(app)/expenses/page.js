@@ -124,9 +124,17 @@ export default function ExpensesPage() {
         title="Expenses"
         description="Manage operational expenses separately from Payroll and Student Billing."
         actions={
-          <Link className="primary-button" href="/expenses/new/">
-            Add expense
-          </Link>
+          <div className="form-actions">
+            <Link className="secondary-button" href="/expenses/financial-docs/">
+              Financial docs to check
+            </Link>
+            <Link className="secondary-button" href="/expenses/recurring/">
+              Recurring templates
+            </Link>
+            <Link className="primary-button" href="/expenses/new/">
+              Add expense
+            </Link>
+          </div>
         }
       />
 

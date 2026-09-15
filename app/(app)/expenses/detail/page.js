@@ -209,6 +209,24 @@ function ExpenseDetailContent() {
             <dd>{expense.receipt_original_name || "Not set"}</dd>
           </div>
           <div>
+            <dt>Source</dt>
+            <dd>{humanize(expense.source_type || "manual")}</dd>
+          </div>
+          {expense.recurring_template_id ? (
+            <div>
+              <dt>Recurring period</dt>
+              <dd>{formatDate(expense.recurring_period_start)}</dd>
+            </div>
+          ) : null}
+          {expense.financial_document_id ? (
+            <div>
+              <dt>Financial document</dt>
+              <dd>
+                <Link href={`/expenses/financial-docs/review/?id=${expense.financial_document_id}`}>Open source document</Link>
+              </dd>
+            </div>
+          ) : null}
+          <div>
             <dt>Created by</dt>
             <dd>{formatProfile(expense.created_by_profile)}</dd>
           </div>

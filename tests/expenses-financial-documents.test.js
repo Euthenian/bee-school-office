@@ -29,6 +29,10 @@ const workflowSql = readFileSync(
   new URL("../supabase/migrations/20260915001000_expenses_financial_documents_workflow.sql", import.meta.url),
   "utf8"
 );
+const ingestionServiceRoleOnlySql = readFileSync(
+  new URL("../supabase/migrations/20260916001000_financial_document_ingestion_service_role_only.sql", import.meta.url),
+  "utf8"
+);
 const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
 const adminShell = readFileSync(new URL("../components/AdminShell.js", import.meta.url), "utf8");
 const financialDocumentsPage = readFileSync(
@@ -280,6 +284,48 @@ test("authorization and document security stay private", () => {
   assert.doesNotMatch(workflowSql, /storage\.objects|publicUrl|getPublicUrl|public bucket/i);
   assert.match(dataSource, /financialDocumentSelect/);
   assert.match(dataSource, /officeTodoSelect/);
+});
+
+test("financial Gmail ingestion RPC is backend-only and preserves idempotent insert behavior", () => {
+  const functionBody =
+    ingestionServiceRoleOnlySql.match(
+      /create or replace function public\.ingest_financial_document_mvp[\s\S]*?\n\$\$;/
+    )?.[0] || "";
+
+  assert.match(functionBody, /select \* into v_school/);
+  assert.match(functionBody, /School % does not belong to organization %/);
+  assert.match(functionBody, /insert into public\.financial_documents as fd/);
+  assert.match(functionBody, /on conflict \(source_mailbox, gmail_message_id\) do update/);
+  assert.match(functionBody, /perform public\.queue_financial_document_notification_mvp\(v_document_id\)/);
+  assert.doesNotMatch(functionBody, /You do not have permission to create financial documents for this organization/);
+  assert.doesNotMatch(functionBody, /can_manage_expenses_org\(p_organization_id\) or public\.is_service_role\(\)/);
+
+  assert.match(
+    ingestionServiceRoleOnlySql,
+    /revoke execute on function public\.ingest_financial_document_mvp\([\s\S]*?\) from public;/
+  );
+  assert.match(
+    ingestionServiceRoleOnlySql,
+    /revoke execute on function public\.ingest_financial_document_mvp\([\s\S]*?\) from anon;/
+  );
+  assert.match(
+    ingestionServiceRoleOnlySql,
+    /revoke execute on function public\.ingest_financial_document_mvp\([\s\S]*?\) from authenticated;/
+  );
+  assert.match(
+    ingestionServiceRoleOnlySql,
+    /grant execute on function public\.ingest_financial_document_mvp\([\s\S]*?\) to service_role;/
+  );
+  assert.doesNotMatch(ingestionServiceRoleOnlySql, /grant execute on function public\.ingest_financial_document_mvp[\s\S]*to authenticated/);
+  assert.doesNotMatch(ingestionServiceRoleOnlySql, /grant execute on function public\.ingest_financial_document_mvp[\s\S]*to anon/);
+
+  assert.doesNotMatch(dataSource, /ingest_financial_document_mvp/);
+  assert.match(workflowSql, /grant execute on function public\.mark_financial_document_read_mvp\(uuid\) to authenticated/);
+  assert.match(workflowSql, /grant execute on function public\.dismiss_financial_document_mvp\(uuid\) to authenticated/);
+  assert.match(workflowSql, /grant execute on function public\.create_office_todo_for_financial_document_mvp\(uuid, date, uuid\) to authenticated/);
+  assert.match(workflowSql, /grant execute on function public\.create_expense_from_financial_document_mvp\(/);
+  assert.match(workflowSql, /financial_documents_management_access/);
+  assert.match(workflowSql, /to authenticated[\s\S]*?using \(public\.can_manage_expenses_org\(organization_id\)\)/);
 });
 
 function createCountRecorder(count) {

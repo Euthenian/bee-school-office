@@ -1,0 +1,2 @@
+[functions.gmail-financial-documents-poll]
+verify_jwt = false

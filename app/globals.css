@@ -678,6 +678,36 @@ textarea:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.billing-alert-button {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.monthly-billing-filters {
+  margin-bottom: 16px;
+}
+
+.monthly-billing-amount-input {
+  min-width: 92px;
+  width: 100%;
+}
+
+.monthly-billing-comment {
+  min-width: 180px;
+  resize: vertical;
+  width: 100%;
+}
+
+.monthly-billing-status-stack {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .data-surface {
   overflow: hidden;
 }

@@ -51,6 +51,22 @@ export function StudentFinanceForm({
               value={form.monthlyFeeYen}
             />
           </label>
+          <label>
+            Billing start date
+            <input
+              onChange={(event) => updateField("billingStartDate", event.target.value)}
+              type="date"
+              value={form.billingStartDate}
+            />
+          </label>
+          <label>
+            Billing end date
+            <input
+              onChange={(event) => updateField("billingEndDate", event.target.value)}
+              type="date"
+              value={form.billingEndDate}
+            />
+          </label>
         </div>
         <div className="form-grid single-column">
           <label>

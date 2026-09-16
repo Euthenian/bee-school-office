@@ -804,6 +804,14 @@ function StudentFinanceSection({ error, finance, mayEdit, onViewBankDetails, stu
           <dd>{formatMonthlyFeeYen(finance?.monthly_fee_yen)}</dd>
         </div>
         <div>
+          <dt>Billing start</dt>
+          <dd>{formatStudentFinanceValue(finance?.billing_start_date)}</dd>
+        </div>
+        <div>
+          <dt>Billing end</dt>
+          <dd>{formatStudentFinanceValue(finance?.billing_end_date)}</dd>
+        </div>
+        <div>
           <dt>Billing address</dt>
           <dd className="preserve-lines">{formatStudentFinanceValue(finance?.postal_address)}</dd>
         </div>

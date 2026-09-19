@@ -8,7 +8,13 @@ import { PageHeader } from "@/components/PageHeader";
 import { StudentFinanceForm } from "@/components/StudentFinanceForm";
 import { DataSurface } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { fetchStudentBankDetails, fetchStudentFinance, fetchStudentProfile, updateStudentFinance } from "@/lib/data";
+import {
+  fetchStudentBankDetails,
+  fetchStudentBillingPlanOptions,
+  fetchStudentFinance,
+  fetchStudentProfile,
+  updateStudentFinance
+} from "@/lib/data";
 import { formatPersonName } from "@/lib/format";
 import { canEditStudentBankDetails, canEditStudentFinance } from "@/lib/roles";
 import { createStudentFinanceForm, hasStudentFinanceData } from "@/lib/student-finance";
@@ -31,6 +37,7 @@ function EditStudentFinanceContent() {
   const mayEditBankDetails = canEditStudentBankDetails(profile);
   const [state, setState] = useState({
     bankDetails: null,
+    billingPlans: [],
     error: "",
     finance: null,
     loading: true,
@@ -51,20 +58,22 @@ function EditStudentFinanceContent() {
       }
 
       setState((current) => ({ ...current, error: "", loading: true }));
-      const [studentResult, financeResult, bankDetailsResult] = await Promise.all([
+      const [studentResult, financeResult, bankDetailsResult, billingPlansResult] = await Promise.all([
         fetchStudentProfile(supabase, studentId),
         fetchStudentFinance(supabase, studentId),
-        mayEditBankDetails ? fetchStudentBankDetails(supabase, studentId) : { data: null, error: null }
+        mayEditBankDetails ? fetchStudentBankDetails(supabase, studentId) : { data: null, error: null },
+        fetchStudentBillingPlanOptions(supabase, studentId)
       ]);
       if (!active) return;
 
-      const loadError = [studentResult.error, financeResult.error, bankDetailsResult.error]
+      const loadError = [studentResult.error, financeResult.error, bankDetailsResult.error, billingPlansResult.error]
         .filter(Boolean)
         .map((item) => item.message)
         .join(" ");
 
       setState({
         bankDetails: bankDetailsResult.data || null,
+        billingPlans: billingPlansResult.data || [],
         error: loadError || "",
         finance: financeResult.data || null,
         loading: false,
@@ -165,6 +174,7 @@ function EditStudentFinanceContent() {
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
 
       <StudentFinanceForm
+        billingPlans={state.billingPlans}
         cancelHref={cancelHref}
         canEditBankDetails={canEditBankDetails}
         initialForm={initialForm}

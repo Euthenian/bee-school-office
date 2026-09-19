@@ -5,7 +5,10 @@ import Link from "next/link";
 import { DataSurface, SurfaceHeader } from "@/components/Surface";
 import { studentBankAccountTypes, validateStudentFinanceForm } from "@/lib/student-finance";
 
+const customFeeValue = "__custom_fee";
+
 export function StudentFinanceForm({
+  billingPlans = [],
   cancelHref,
   canEditBankDetails = false,
   initialForm,
@@ -17,6 +20,23 @@ export function StudentFinanceForm({
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateBillingPlan(value) {
+    if (value === customFeeValue) {
+      setForm((current) => ({ ...current, billingPlanId: "" }));
+      return;
+    }
+
+    const selectedPlan = billingPlans.find((plan) => plan.id === value);
+    setForm((current) => ({
+      ...current,
+      billingPlanId: value,
+      monthlyFeeYen:
+        selectedPlan?.monthly_fee_yen === null || selectedPlan?.monthly_fee_yen === undefined
+          ? current.monthlyFeeYen
+          : String(selectedPlan.monthly_fee_yen)
+    }));
   }
 
   function handleSubmit(event) {
@@ -32,6 +52,8 @@ export function StudentFinanceForm({
     onSubmit(form);
   }
 
+  const hasSelectedPlan = Boolean(form.billingPlanId);
+
   return (
     <form className="student-form" onSubmit={handleSubmit}>
       {localError ? <p className="inline-alert">{localError}</p> : null}
@@ -42,12 +64,24 @@ export function StudentFinanceForm({
         </SurfaceHeader>
         <div className="form-grid">
           <label>
+            Billing plan
+            <select onChange={(event) => updateBillingPlan(event.target.value)} value={form.billingPlanId || customFeeValue}>
+              {billingPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {formatBillingPlanOption(plan)}
+                </option>
+              ))}
+              <option value={customFeeValue}>Custom fee</option>
+            </select>
+          </label>
+          <label>
             Monthly fee
             <input
               inputMode="numeric"
               maxLength="6"
               onChange={(event) => updateField("monthlyFeeYen", event.target.value)}
               pattern="[0-9]*"
+              readOnly={hasSelectedPlan}
               value={form.monthlyFeeYen}
             />
           </label>
@@ -152,4 +186,15 @@ export function StudentFinanceForm({
       </div>
     </form>
   );
+}
+
+function formatBillingPlanOption(plan) {
+  const amount = new Intl.NumberFormat("en-US", {
+    currency: "JPY",
+    maximumFractionDigits: 0,
+    style: "currency"
+  }).format(Number(plan.monthly_fee_yen || 0));
+  const status = plan.active ? "" : " (inactive)";
+
+  return `${plan.name} - ${amount}${status}`;
 }

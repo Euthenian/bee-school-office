@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { DataSurface, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
@@ -123,6 +124,22 @@ export default function SettingsPage() {
           </form>
         </DataSurface>
 
+
+        <DataSurface as="article">
+          <SurfaceHeader>
+            <h2>Billing Plans</h2>
+          </SurfaceHeader>
+          <dl className="detail-list">
+            <div>
+              <dt>Student finance</dt>
+              <dd>
+                <Link className="secondary-button" href="/settings/billing-plans/">
+                  Manage Billing Plans
+                </Link>
+              </dd>
+            </div>
+          </dl>
+        </DataSurface>
         <DataSurface as="article">
           <SurfaceHeader>
             <h2>Current Role</h2>
@@ -142,3 +159,4 @@ export default function SettingsPage() {
     </>
   );
 }
+

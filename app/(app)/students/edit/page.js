@@ -7,11 +7,20 @@ import { ContactRowsEditor } from "@/components/ContactRowsEditor";
 import { EmptyState } from "@/components/EmptyState";
 import { GuardianRowsEditor } from "@/components/GuardianRowsEditor";
 import { PageHeader } from "@/components/PageHeader";
+import { StudentClassAssignment } from "@/components/StudentClassAssignment";
 import { StudentNotesEditor } from "@/components/StudentNotesEditor";
 import { DataSurface, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { lessonDays, lessonTypes } from "@/lib/class-details";
-import { fetchClassLevels, fetchSchoolTeachers, fetchSchools, fetchStudentProfile, updateStudent } from "@/lib/data";
+import {
+  fetchClassLevels,
+  fetchClassOptions,
+  fetchSchoolTeachers,
+  fetchSchools,
+  fetchStudentBillingPlanOptions,
+  fetchStudentFinance,
+  fetchStudentProfile,
+  updateStudent
+} from "@/lib/data";
 import { formatEnrollment, formatPersonName, formatStudentAge } from "@/lib/format";
 import { canCreateStudents } from "@/lib/roles";
 import { createEmptyStudentForm, createStudentEditState, studentStatuses, validateGuardianRows } from "@/lib/student-form";
@@ -36,10 +45,13 @@ function EditStudentContent() {
   const [guardians, setGuardians] = useState(() => createStudentEditState(null).guardians);
   const [notes, setNotes] = useState(() => createStudentEditState(null).notes);
   const [schools, setSchools] = useState([]);
+  const [billingPlans, setBillingPlans] = useState([]);
   const [classLevels, setClassLevels] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [student, setStudent] = useState(null);
   const [loadingFoundation, setLoadingFoundation] = useState(true);
+  const [loadingClasses, setLoadingClasses] = useState(false);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -66,7 +78,12 @@ function EditStudentContent() {
       ]);
       if (!active) return;
 
-      const loadError = [studentResult.error, schoolsResult.error, levelsResult.error]
+      const [financeResult, billingPlansResult] = studentResult.data
+        ? await Promise.all([fetchStudentFinance(supabase, studentId), fetchStudentBillingPlanOptions(supabase, studentId)])
+        : [{ data: null, error: null }, { data: [], error: null }];
+      if (!active) return;
+
+      const loadError = [studentResult.error, schoolsResult.error, levelsResult.error, financeResult.error, billingPlansResult.error]
         .filter(Boolean)
         .map((item) => item.message)
         .join(" ");
@@ -75,15 +92,17 @@ function EditStudentContent() {
         setError(loadError || "This student could not be found or is not visible to your role.");
         setStudent(null);
         setSchools([]);
+        setBillingPlans([]);
         setClassLevels([]);
       } else {
-        const editState = createStudentEditState(studentResult.data);
+        const editState = createStudentEditState(studentResult.data, financeResult.data);
         setStudent(studentResult.data);
         setForm(editState.form);
         setContacts(editState.contacts);
         setGuardians(editState.guardians);
         setNotes(editState.notes);
         setSchools(schoolsResult.data || []);
+        setBillingPlans(billingPlansResult.data || []);
         setClassLevels(levelsResult.data || []);
       }
 
@@ -96,6 +115,45 @@ function EditStudentContent() {
       active = false;
     };
   }, [authLoading, mayEdit, session, studentId]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadClasses() {
+      setClasses([]);
+      if (!form.schoolId || !session || !mayEdit) {
+        setLoadingClasses(false);
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        setLoadingClasses(false);
+        return;
+      }
+
+      setLoadingClasses(true);
+      const { data, error: classesError } = await fetchClassOptions(supabase, form.schoolId, {
+        currentClassId: form.classId,
+        includeInactive: true
+      });
+      if (!active) return;
+
+      if (classesError) {
+        setError(classesError.message);
+        setClasses([]);
+      } else {
+        setClasses(data || []);
+      }
+      setLoadingClasses(false);
+    }
+
+    loadClasses();
+
+    return () => {
+      active = false;
+    };
+  }, [form.classId, form.schoolId, mayEdit, session]);
 
   useEffect(() => {
     let active = true;
@@ -137,6 +195,11 @@ function EditStudentContent() {
     () => schools.filter((school) => school.status === "active" || school.id === form.schoolId),
     [form.schoolId, schools]
   );
+  const selectedSchool = useMemo(() => schools.find((school) => school.id === form.schoolId), [form.schoolId, schools]);
+  const billingPlanOptions = useMemo(
+    () => getBillingPlanOptionsForSchool(billingPlans, selectedSchool, form.billingPlanId),
+    [billingPlans, form.billingPlanId, selectedSchool]
+  );
   const hasDateOfBirth = Boolean(form.dateOfBirth);
   const ageDisplay = useMemo(() => {
     return formatStudentAge({
@@ -149,7 +212,10 @@ function EditStudentContent() {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "schoolId" ? { assignedTeacherProfileId: "" } : {})
+      ...(field === "schoolId"
+        ? { assignedTeacherProfileId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
+        : {}),
+      ...(field === "classAssignmentMode" ? { classId: value === "new" ? "" : current.classId } : {})
     }));
   }
 
@@ -180,10 +246,40 @@ function EditStudentContent() {
       }
     }
 
+    if (form.classAssignmentMode === "existing" && !form.classId) {
+      setError("Select an existing class or choose Create new class.");
+      setSubmitting(false);
+      return;
+    }
+
+    const selectedBillingPlan = billingPlanOptions.find((plan) => plan.id === form.billingPlanId);
+    const selectedClass = classes.find((classRow) => classRow.id === form.classId);
+    const submitForm = selectedBillingPlan?.lesson_type ? { ...form, lessonType: selectedBillingPlan.lesson_type } : form;
+    const compatibilityError = getPackageClassCompatibilityError(submitForm, selectedBillingPlan, selectedClass);
+    if (compatibilityError) {
+      setError(compatibilityError);
+      setSubmitting(false);
+      return;
+    }
+
+    if (form.monthlyFeeYen !== "" && !/^\d+$/.test(String(form.monthlyFeeYen))) {
+      setError("Monthly fee must be a whole yen amount.");
+      setSubmitting(false);
+      return;
+    }
+
+    const monthlyFee = form.monthlyFeeYen === "" ? null : Number(form.monthlyFeeYen);
+    if (monthlyFee !== null && (!Number.isInteger(monthlyFee) || monthlyFee < 0 || monthlyFee > 100000)) {
+      setError("Monthly fee must be between 0 and 100000.");
+      setSubmitting(false);
+      return;
+    }
+
     const { error: updateError } = await updateStudent(supabase, {
       studentId,
-      ...form,
+      ...submitForm,
       contacts,
+      createNewClass: submitForm.classAssignmentMode === "new",
       guardians,
       notes
     });
@@ -340,64 +436,18 @@ function EditStudentContent() {
           <SurfaceHeader>
             <h2>Class Details</h2>
           </SurfaceHeader>
-          <div className="form-grid">
-            <label>
-              Assigned teacher
-              <select
-                disabled={!form.schoolId || loadingTeachers}
-                onChange={(event) => updateField("assignedTeacherProfileId", event.target.value)}
-                value={form.assignedTeacherProfileId}
-              >
-                <option value="">{loadingTeachers ? "Loading teachers..." : "No teacher assigned"}</option>
-                {teachers.map((teacher) => (
-                  <option key={teacher.profile_id} value={teacher.profile_id}>
-                    {teacher.full_name || teacher.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lesson type
-              <select onChange={(event) => updateField("lessonType", event.target.value)} required value={form.lessonType}>
-                {lessonTypes.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Level
-              <select
-                disabled={loadingFoundation || !classLevels.length}
-                onChange={(event) => updateField("classLevelId", event.target.value)}
-                required
-                value={form.classLevelId}
-              >
-                <option value="">{loadingFoundation ? "Loading levels..." : "Select a level"}</option>
-                {classLevels.map((level) => (
-                  <option key={level.id} value={level.id}>
-                    {level.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lesson day
-              <select onChange={(event) => updateField("lessonDay", event.target.value)} required value={form.lessonDay}>
-                <option value="">Select a day</option>
-                {lessonDays.map((day) => (
-                  <option key={day.value} value={day.value}>
-                    {day.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lesson time
-              <input onChange={(event) => updateField("lessonTime", event.target.value)} required type="time" value={form.lessonTime} />
-            </label>
-          </div>
+          <StudentClassAssignment
+            billingPlans={billingPlanOptions}
+            classLevels={classLevels}
+            classes={classes}
+            form={form}
+            loadingBillingPlans={loadingFoundation}
+            loadingClasses={loadingClasses}
+            loadingClassLevels={loadingFoundation}
+            loadingTeachers={loadingTeachers}
+            onChange={updateField}
+            teachers={teachers}
+          />
         </DataSurface>
 
         <DataSurface>
@@ -427,7 +477,13 @@ function EditStudentContent() {
           </Link>
           <button
             className="primary-button"
-            disabled={submitting || loadingFoundation || !availableSchools.length || !classLevels.length}
+            disabled={
+              submitting ||
+              loadingFoundation ||
+              loadingClasses ||
+              !availableSchools.length ||
+              (form.classAssignmentMode === "new" && !classLevels.length)
+            }
             type="submit"
           >
             {submitting ? "Saving..." : "Save changes"}
@@ -436,6 +492,27 @@ function EditStudentContent() {
       </form>
     </>
   );
+}
+
+function getBillingPlanOptionsForSchool(plans = [], school = null, currentPlanId = "") {
+  if (!school) return [];
+
+  return (plans || []).filter((plan) => {
+    const sameOrganization = plan.organization_id === school.organization_id;
+    const scopedToSchool = !plan.school_id || plan.school_id === school.id;
+    return sameOrganization && scopedToSchool && (plan.active || plan.id === currentPlanId);
+  });
+}
+
+function getPackageClassCompatibilityError(form, selectedBillingPlan, selectedClass) {
+  if (!selectedBillingPlan?.lesson_type) return "";
+
+  const classLessonType = form.classAssignmentMode === "new" ? form.lessonType : selectedClass?.lesson_type;
+  if (classLessonType && classLessonType !== selectedBillingPlan.lesson_type) {
+    return "Choose a class with the same lesson type as the selected Lesson package, or choose Custom fee.";
+  }
+
+  return "";
 }
 
 function EditStudentLoading() {

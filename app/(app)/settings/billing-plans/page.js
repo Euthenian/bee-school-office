@@ -15,6 +15,7 @@ import {
   updateBillingPlan
 } from "@/lib/data";
 import { formatBillingAmount } from "@/lib/billing";
+import { formatLessonType, lessonTypes } from "@/lib/class-details";
 import { canEditStudentFinance } from "@/lib/roles";
 import { createBillingPlanForm, validateBillingPlanForm } from "@/lib/billing-plans";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -164,7 +165,7 @@ export default function BillingPlansSettingsPage() {
     }
 
     resetForm();
-    await reloadPlans(supabase, editingId ? "Billing Plan updated." : "Billing Plan created.");
+    await reloadPlans(supabase, editingId ? "Lesson Package updated." : "Lesson Package created.");
   }
 
   async function handleActiveChange(plan, active) {
@@ -178,15 +179,15 @@ export default function BillingPlansSettingsPage() {
       return;
     }
 
-    await reloadPlans(supabase, active ? "Billing Plan activated." : "Billing Plan deactivated.");
+    await reloadPlans(supabase, active ? "Lesson Package activated." : "Lesson Package deactivated.");
   }
 
   if (!authLoading && !mayManage) {
     return (
       <>
-        <PageHeader eyebrow="Settings" title="Billing Plans" />
+        <PageHeader eyebrow="Settings" title="Lesson Packages" />
         <DataSurface>
-          <EmptyState title="Billing Plans are restricted" description="Your current role cannot manage finance configuration." />
+          <EmptyState title="Lesson Packages are restricted" description="Your current role cannot manage finance configuration." />
         </DataSurface>
       </>
     );
@@ -196,7 +197,7 @@ export default function BillingPlansSettingsPage() {
     <>
       <PageHeader
         eyebrow="Settings"
-        title="Billing Plans"
+        title="Lesson Packages"
         actions={
           <Link className="secondary-button" href="/settings/">
             Back to settings
@@ -209,34 +210,43 @@ export default function BillingPlansSettingsPage() {
 
       <DataSurface>
         <SurfaceHeader>
-          <h2>{editingId ? "Edit Billing Plan" : "Create Billing Plan"}</h2>
+          <h2>Lesson Package Details</h2>
         </SurfaceHeader>
         <form className="student-form" onSubmit={handleSubmit}>
           <div className="form-grid">
             <label>
-              Organization
-              <select onChange={(event) => updateField("organizationId", event.target.value)} value={form.organizationId}>
-                {foundation.organizations.map((organization) => (
-                  <option key={organization.id} value={organization.id}>
-                    {organization.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              School scope
-              <select onChange={(event) => updateField("schoolId", event.target.value)} value={form.schoolId}>
-                <option value="">Organization-wide</option>
-                {schoolOptions.map((school) => (
-                  <option key={school.id} value={school.id}>
-                    {school.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
               Name
               <input onChange={(event) => updateField("name", event.target.value)} value={form.name} />
+            </label>
+            <label>
+              Lesson type
+              <select onChange={(event) => updateField("lessonType", event.target.value)} value={form.lessonType}>
+                <option value="">Not set</option>
+                {lessonTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Lesson duration
+              <input
+                inputMode="numeric"
+                onChange={(event) => updateField("lessonDurationMinutes", event.target.value)}
+                pattern="[0-9]*"
+                value={form.lessonDurationMinutes}
+              />
+              <span className="helper-text">minutes</span>
+            </label>
+            <label>
+              Lessons per month
+              <input
+                inputMode="numeric"
+                onChange={(event) => updateField("lessonsPerMonth", event.target.value)}
+                pattern="[0-9]*"
+                value={form.lessonsPerMonth}
+              />
             </label>
             <label>
               Monthly fee
@@ -249,14 +259,35 @@ export default function BillingPlansSettingsPage() {
               />
             </label>
             <label>
+              Scope
+              <select onChange={(event) => updateField("schoolId", event.target.value)} value={form.schoolId}>
+                <option value="">All schools</option>
+                {schoolOptions.map((school) => (
+                  <option key={school.id} value={school.id}>
+                    {school.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Organization
+              <select onChange={(event) => updateField("organizationId", event.target.value)} value={form.organizationId}>
+                {foundation.organizations.map((organization) => (
+                  <option key={organization.id} value={organization.id}>
+                    {organization.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Sort order
               <input inputMode="numeric" onChange={(event) => updateField("sortOrder", event.target.value)} value={form.sortOrder} />
             </label>
             <label>
-              Status
+              Active
               <select onChange={(event) => updateField("active", event.target.value === "active")} value={form.active ? "active" : "inactive"}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
+                <option value="active">Yes</option>
+                <option value="inactive">No</option>
               </select>
             </label>
           </div>
@@ -267,7 +298,7 @@ export default function BillingPlansSettingsPage() {
               </button>
             ) : null}
             <button className="primary-button" disabled={state.saving || foundation.loading} type="submit">
-              {state.saving ? "Saving..." : editingId ? "Save Billing Plan" : "Create Billing Plan"}
+              {state.saving ? "Saving..." : editingId ? "Save Lesson Package" : "Create Lesson Package"}
             </button>
           </div>
         </form>
@@ -275,7 +306,7 @@ export default function BillingPlansSettingsPage() {
 
       <DataSurface>
         <SurfaceHeader>
-          <h2>Billing Plans</h2>
+          <h2>Lesson Packages</h2>
         </SurfaceHeader>
         <div className="form-grid">
           <label>
@@ -291,13 +322,16 @@ export default function BillingPlansSettingsPage() {
         </div>
 
         {state.loading ? (
-          <div className="table-placeholder">Loading Billing Plans...</div>
+          <div className="table-placeholder">Loading Lesson Packages...</div>
         ) : state.plans.length ? (
           <ResponsiveTable>
             <table>
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Lesson type</th>
+                  <th>Duration</th>
+                  <th>Lessons/month</th>
                   <th>Monthly fee</th>
                   <th>Scope</th>
                   <th>Status</th>
@@ -309,8 +343,11 @@ export default function BillingPlansSettingsPage() {
                 {state.plans.map((plan) => (
                   <tr key={plan.id}>
                     <td>{plan.name}</td>
+                    <td>{formatLessonType(plan.lesson_type)}</td>
+                    <td>{plan.lesson_duration_minutes ? `${plan.lesson_duration_minutes} min` : "Not set"}</td>
+                    <td>{plan.lessons_per_month ? `${plan.lessons_per_month}/month` : "Not set"}</td>
                     <td>{formatBillingAmount(plan.monthly_fee_yen, "JPY")}</td>
-                    <td>{plan.school_id ? scopeSchools.get(plan.school_id)?.name || "School-specific" : "Organization-wide"}</td>
+                    <td>{plan.school_id ? scopeSchools.get(plan.school_id)?.name || "School-specific" : "All schools"}</td>
                     <td><span className={`status-badge ${plan.active ? "active" : "inactive"}`}>{plan.active ? "active" : "inactive"}</span></td>
                     <td>{plan.sort_order}</td>
                     <td>
@@ -329,7 +366,7 @@ export default function BillingPlansSettingsPage() {
             </table>
           </ResponsiveTable>
         ) : (
-          <EmptyState title="No Billing Plans" description="Create the first predefined Billing Plan for this organization." />
+          <EmptyState title="No Lesson Packages" description="Create the first predefined Lesson Package for this organization." />
         )}
       </DataSurface>
     </>

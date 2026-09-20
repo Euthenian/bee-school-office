@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { DataSurface, SurfaceHeader } from "@/components/Surface";
+import { formatLessonPackageOption } from "@/lib/billing-plans";
 import { studentBankAccountTypes, validateStudentFinanceForm } from "@/lib/student-finance";
 
 const customFeeValue = "__custom_fee";
@@ -64,11 +65,11 @@ export function StudentFinanceForm({
         </SurfaceHeader>
         <div className="form-grid">
           <label>
-            Billing plan
+            Lesson package
             <select onChange={(event) => updateBillingPlan(event.target.value)} value={form.billingPlanId || customFeeValue}>
               {billingPlans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
-                  {formatBillingPlanOption(plan)}
+                  {formatLessonPackageOption(plan)}
                 </option>
               ))}
               <option value={customFeeValue}>Custom fee</option>
@@ -186,15 +187,4 @@ export function StudentFinanceForm({
       </div>
     </form>
   );
-}
-
-function formatBillingPlanOption(plan) {
-  const amount = new Intl.NumberFormat("en-US", {
-    currency: "JPY",
-    maximumFractionDigits: 0,
-    style: "currency"
-  }).format(Number(plan.monthly_fee_yen || 0));
-  const status = plan.active ? "" : " (inactive)";
-
-  return `${plan.name} - ${amount}${status}`;
 }

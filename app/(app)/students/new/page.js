@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import { ContactRowsEditor } from "@/components/ContactRowsEditor";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
+import { StudentClassAssignment } from "@/components/StudentClassAssignment";
 import { DataSurface, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { lessonDays, lessonTypes } from "@/lib/class-details";
 import { createInitialContactRows } from "@/lib/contacts";
-import { createStudent, fetchClassLevels, fetchSchoolTeachers, fetchSchools } from "@/lib/data";
+import { createStudent, fetchBillingPlans, fetchClassLevels, fetchClassOptions, fetchSchoolTeachers, fetchSchools } from "@/lib/data";
 import { formatStudentAge } from "@/lib/format";
 import { canCreateStudents } from "@/lib/roles";
 import { studentStatuses } from "@/lib/student-form";
@@ -25,6 +25,10 @@ const initialForm = {
   dateOfBirth: "",
   ageOverride: "",
   status: "active",
+  billingPlanId: "",
+  monthlyFeeYen: "",
+  classAssignmentMode: "existing",
+  classId: "",
   assignedTeacherProfileId: "",
   lessonType: "group",
   classLevelId: "",
@@ -43,10 +47,14 @@ export default function NewStudentPage() {
   const [form, setForm] = useState(initialForm);
   const [contacts, setContacts] = useState(() => createInitialContactRows());
   const [schools, setSchools] = useState([]);
+  const [billingPlans, setBillingPlans] = useState([]);
   const [classLevels, setClassLevels] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loadingSchools, setLoadingSchools] = useState(true);
+  const [loadingBillingPlans, setLoadingBillingPlans] = useState(true);
   const [loadingClassLevels, setLoadingClassLevels] = useState(true);
+  const [loadingClasses, setLoadingClasses] = useState(false);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -59,22 +67,30 @@ export default function NewStudentPage() {
       const supabase = getSupabaseBrowserClient();
       if (!supabase || !session || !mayCreate) {
         setLoadingSchools(false);
+        setLoadingBillingPlans(false);
         setLoadingClassLevels(false);
         return;
       }
 
-      const [schoolsResult, levelsResult] = await Promise.all([fetchSchools(supabase), fetchClassLevels(supabase)]);
+      const [schoolsResult, billingPlansResult, levelsResult] = await Promise.all([
+        fetchSchools(supabase),
+        fetchBillingPlans(supabase),
+        fetchClassLevels(supabase)
+      ]);
       if (!active) return;
 
-      if (schoolsResult.error || levelsResult.error) {
-        setError([schoolsResult.error?.message, levelsResult.error?.message].filter(Boolean).join(" "));
+      if (schoolsResult.error || billingPlansResult.error || levelsResult.error) {
+        setError([schoolsResult.error?.message, billingPlansResult.error?.message, levelsResult.error?.message].filter(Boolean).join(" "));
         setSchools([]);
+        setBillingPlans([]);
         setClassLevels([]);
       } else {
         setSchools(schoolsResult.data || []);
+        setBillingPlans(billingPlansResult.data || []);
         setClassLevels(levelsResult.data || []);
       }
       setLoadingSchools(false);
+      setLoadingBillingPlans(false);
       setLoadingClassLevels(false);
     }
 
@@ -84,6 +100,42 @@ export default function NewStudentPage() {
       active = false;
     };
   }, [mayCreate, session]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadClasses() {
+      setClasses([]);
+      if (!form.schoolId || !session || !mayCreate) {
+        setLoadingClasses(false);
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        setLoadingClasses(false);
+        return;
+      }
+
+      setLoadingClasses(true);
+      const { data, error: classesError } = await fetchClassOptions(supabase, form.schoolId);
+      if (!active) return;
+
+      if (classesError) {
+        setError(classesError.message);
+        setClasses([]);
+      } else {
+        setClasses(data || []);
+      }
+      setLoadingClasses(false);
+    }
+
+    loadClasses();
+
+    return () => {
+      active = false;
+    };
+  }, [form.schoolId, mayCreate, session]);
 
   useEffect(() => {
     let active = true;
@@ -122,6 +174,11 @@ export default function NewStudentPage() {
   }, [form.schoolId, mayCreate, session]);
 
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
+  const selectedSchool = useMemo(() => schools.find((school) => school.id === form.schoolId), [form.schoolId, schools]);
+  const billingPlanOptions = useMemo(
+    () => getBillingPlanOptionsForSchool(billingPlans, selectedSchool, form.billingPlanId),
+    [billingPlans, form.billingPlanId, selectedSchool]
+  );
   const hasDateOfBirth = Boolean(form.dateOfBirth);
   const ageDisplay = useMemo(() => {
     return formatStudentAge({
@@ -134,7 +191,10 @@ export default function NewStudentPage() {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "schoolId" ? { assignedTeacherProfileId: "" } : {})
+      ...(field === "schoolId"
+        ? { assignedTeacherProfileId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
+        : {}),
+      ...(field === "classAssignmentMode" ? { classId: value === "new" ? "" : current.classId } : {})
     }));
   }
 
@@ -167,7 +227,40 @@ export default function NewStudentPage() {
       }
     }
 
-    const { data: studentId, error: createError } = await createStudent(supabase, { ...form, contacts });
+    if (form.classAssignmentMode === "existing" && !form.classId) {
+      setError("Select an existing class or choose Create new class.");
+      setSubmitting(false);
+      return;
+    }
+
+    const selectedBillingPlan = billingPlanOptions.find((plan) => plan.id === form.billingPlanId);
+    const selectedClass = classes.find((classRow) => classRow.id === form.classId);
+    const submitForm = selectedBillingPlan?.lesson_type ? { ...form, lessonType: selectedBillingPlan.lesson_type } : form;
+    const compatibilityError = getPackageClassCompatibilityError(submitForm, selectedBillingPlan, selectedClass);
+    if (compatibilityError) {
+      setError(compatibilityError);
+      setSubmitting(false);
+      return;
+    }
+
+    if (form.monthlyFeeYen !== "" && !/^\d+$/.test(String(form.monthlyFeeYen))) {
+      setError("Monthly fee must be a whole yen amount.");
+      setSubmitting(false);
+      return;
+    }
+
+    const monthlyFee = form.monthlyFeeYen === "" ? null : Number(form.monthlyFeeYen);
+    if (monthlyFee !== null && (!Number.isInteger(monthlyFee) || monthlyFee < 0 || monthlyFee > 100000)) {
+      setError("Monthly fee must be between 0 and 100000.");
+      setSubmitting(false);
+      return;
+    }
+
+    const { data: studentId, error: createError } = await createStudent(supabase, {
+      ...submitForm,
+      contacts,
+      createNewClass: submitForm.classAssignmentMode === "new"
+    });
 
     if (createError) {
       setError(createError.message);
@@ -270,59 +363,6 @@ export default function NewStudentPage() {
               />
             </label>
             <label>
-              Start date
-              <input onChange={(event) => updateField("startDate", event.target.value)} type="date" value={form.startDate} />
-            </label>
-          </div>
-        </DataSurface>
-
-        <DataSurface>
-          <SurfaceHeader>
-            <h2>Class Details</h2>
-          </SurfaceHeader>
-          <div className="form-grid">
-            <label>
-              Assigned teacher
-              <select
-                disabled={!form.schoolId || loadingTeachers}
-                onChange={(event) => updateField("assignedTeacherProfileId", event.target.value)}
-                value={form.assignedTeacherProfileId}
-              >
-                <option value="">{loadingTeachers ? "Loading teachers..." : "No teacher assigned"}</option>
-                {teachers.map((teacher) => (
-                  <option key={teacher.profile_id} value={teacher.profile_id}>
-                    {teacher.full_name || teacher.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lesson type
-              <select onChange={(event) => updateField("lessonType", event.target.value)} required value={form.lessonType}>
-                {lessonTypes.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Level
-              <select
-                disabled={loadingClassLevels || !classLevels.length}
-                onChange={(event) => updateField("classLevelId", event.target.value)}
-                required
-                value={form.classLevelId}
-              >
-                <option value="">{loadingClassLevels ? "Loading levels..." : "Select a level"}</option>
-                {classLevels.map((level) => (
-                  <option key={level.id} value={level.id}>
-                    {level.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
               Student age
               {hasDateOfBirth ? (
                 <input readOnly value={ageDisplay} />
@@ -339,21 +379,28 @@ export default function NewStudentPage() {
               )}
             </label>
             <label>
-              Lesson day
-              <select onChange={(event) => updateField("lessonDay", event.target.value)} required value={form.lessonDay}>
-                <option value="">Select a day</option>
-                {lessonDays.map((day) => (
-                  <option key={day.value} value={day.value}>
-                    {day.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Lesson time
-              <input onChange={(event) => updateField("lessonTime", event.target.value)} required type="time" value={form.lessonTime} />
+              Start date
+              <input onChange={(event) => updateField("startDate", event.target.value)} type="date" value={form.startDate} />
             </label>
           </div>
+        </DataSurface>
+
+        <DataSurface>
+          <SurfaceHeader>
+            <h2>Class Details</h2>
+          </SurfaceHeader>
+          <StudentClassAssignment
+            billingPlans={billingPlanOptions}
+            classLevels={classLevels}
+            classes={classes}
+            form={form}
+            loadingBillingPlans={loadingBillingPlans}
+            loadingClasses={loadingClasses}
+            loadingClassLevels={loadingClassLevels}
+            loadingTeachers={loadingTeachers}
+            onChange={updateField}
+            teachers={teachers}
+          />
         </DataSurface>
 
         <DataSurface>
@@ -421,7 +468,15 @@ export default function NewStudentPage() {
           </Link>
           <button
             className="primary-button"
-            disabled={submitting || loadingSchools || loadingClassLevels || !activeSchools.length || !classLevels.length}
+            disabled={
+              submitting ||
+              loadingSchools ||
+              loadingBillingPlans ||
+              loadingClasses ||
+              loadingClassLevels ||
+              !activeSchools.length ||
+              (form.classAssignmentMode === "new" && !classLevels.length)
+            }
             type="submit"
           >
             {submitting ? "Creating..." : "Create student"}
@@ -430,4 +485,25 @@ export default function NewStudentPage() {
       </form>
     </>
   );
+}
+
+function getBillingPlanOptionsForSchool(plans = [], school = null, currentPlanId = "") {
+  if (!school) return [];
+
+  return (plans || []).filter((plan) => {
+    const sameOrganization = plan.organization_id === school.organization_id;
+    const scopedToSchool = !plan.school_id || plan.school_id === school.id;
+    return sameOrganization && scopedToSchool && (plan.active || plan.id === currentPlanId);
+  });
+}
+
+function getPackageClassCompatibilityError(form, selectedBillingPlan, selectedClass) {
+  if (!selectedBillingPlan?.lesson_type) return "";
+
+  const classLessonType = form.classAssignmentMode === "new" ? form.lessonType : selectedClass?.lesson_type;
+  if (classLessonType && classLessonType !== selectedBillingPlan.lesson_type) {
+    return "Choose a class with the same lesson type as the selected Lesson package, or choose Custom fee.";
+  }
+
+  return "";
 }

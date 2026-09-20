@@ -1287,6 +1287,10 @@ dd {
   width: 36px;
 }
 
+.class-delete-button {
+  gap: 6px;
+}
+
 .table-cell-stack,
 .follow-up-lines {
   display: grid;

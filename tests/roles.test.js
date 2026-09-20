@@ -21,6 +21,7 @@ import {
   validateStudentRefundForm
 } from "../lib/billing.js";
 import { formatClassSummary, formatLessonTime, lessonDays, lessonTypes } from "../lib/class-details.js";
+import { filterClasses, formatClassOption, getClassActiveStudentCount } from "../lib/classes.js";
 import {
   addContactRow,
   createContactRowsFromStudentContacts,
@@ -84,6 +85,7 @@ import { formatCountBadgeValue } from "../lib/navigation-badges.js";
 import {
   canCreateStudents,
   canManageBilling,
+  canManageClasses,
   canManageExpenses,
   canManageFinance,
   canManagePayroll,
@@ -151,6 +153,14 @@ const trialLessonMissingParticipantConversionSql = readFileSync(
   new URL("../supabase/migrations/20260920001000_trial_lesson_missing_participant_conversion.sql", import.meta.url),
   "utf8"
 );
+const classManagementSql = readFileSync(
+  new URL("../supabase/migrations/20260920003000_class_management_and_student_assignment.sql", import.meta.url),
+  "utf8"
+);
+const classSafeDeleteSql = readFileSync(
+  new URL("../supabase/migrations/20260920004000_safe_class_delete.sql", import.meta.url),
+  "utf8"
+);
 const gmailTrialBookingCronHealthSql = readFileSync(
   new URL("../supabase/migrations/20260828001000_gmail_trial_booking_cron_health.sql", import.meta.url),
   "utf8"
@@ -206,6 +216,11 @@ const teachersPage = readFileSync(new URL("../app/(app)/teachers/page.js", impor
 const teacherNewPage = readFileSync(new URL("../app/(app)/teachers/new/page.js", import.meta.url), "utf8");
 const teacherEditPage = readFileSync(new URL("../app/(app)/teachers/edit/page.js", import.meta.url), "utf8");
 const teacherProfilePage = readFileSync(new URL("../app/(app)/teachers/profile/page.js", import.meta.url), "utf8");
+const classesPage = readFileSync(new URL("../app/(app)/classes/page.js", import.meta.url), "utf8");
+const classNewPage = readFileSync(new URL("../app/(app)/classes/new/page.js", import.meta.url), "utf8");
+const classEditPage = readFileSync(new URL("../app/(app)/classes/edit/page.js", import.meta.url), "utf8");
+const classProfilePage = readFileSync(new URL("../app/(app)/classes/profile/page.js", import.meta.url), "utf8");
+const classDeleteDialog = readFileSync(new URL("../components/ClassDeleteDialog.js", import.meta.url), "utf8");
 const payrollPage = readFileSync(new URL("../app/(app)/payroll/page.js", import.meta.url), "utf8");
 const payrollPeriodNewPage = readFileSync(new URL("../app/(app)/payroll/periods/new/page.js", import.meta.url), "utf8");
 const payrollPeriodDetailPage = readFileSync(new URL("../app/(app)/payroll/periods/detail/page.js", import.meta.url), "utf8");
@@ -398,6 +413,95 @@ test("class details use controlled shared values and compact formatting", () => 
     }),
     "Elementary / Group / Monday 16:30"
   );
+});
+
+test("class management uses explicit classes and enrollment assignment", () => {
+  const classRows = [
+    {
+      id: "class-1",
+      lesson_type: "group",
+      lesson_day: "monday",
+      lesson_time: "17:00:00",
+      school_id: "school-1",
+      status: "active",
+      class_levels: { label: "Elementary" },
+      assigned_teacher: { full_name: "Nao" },
+      schools: { name: "Ohashi" },
+      student_enrollments: [{ status: "active" }, { status: "withdrawn" }]
+    },
+    {
+      id: "class-2",
+      lesson_type: "private",
+      lesson_day: "tuesday",
+      lesson_time: "18:00:00",
+      school_id: "school-2",
+      status: "inactive",
+      class_levels: { label: "Baby" },
+      assigned_teacher: null,
+      schools: { name: "Tenjin" },
+      student_enrollments: []
+    }
+  ];
+
+  assert.equal(formatClassOption(classRows[0]), "Monday 17:00 · Elementary · Group · Nao");
+  assert.equal(getClassActiveStudentCount(classRows[0]), 1);
+  assert.deepEqual(filterClasses(classRows, { search: "nao", schoolId: "all", lessonType: "all", status: "active" }).map((row) => row.id), [
+    "class-1"
+  ]);
+  assert.equal(canManageClasses({ school_memberships: [{ role: "school_manager" }] }), true);
+  assert.equal(canManageClasses({ school_memberships: [{ role: "teacher" }] }), false);
+  assert.equal(
+    getVisibleNavigation({ school_memberships: [{ role: "school_manager" }] }).some((item) => item.href === "/classes/"),
+    true
+  );
+
+  assert.match(classesPage, /fetchClasses/);
+  assert.match(classesPage, /Students/);
+  assert.match(classesPage, /deleteClass/);
+  assert.match(classesPage, /ClassDeleteDialog/);
+  assert.match(classesPage, /<th>Actions<\/th>/);
+  assert.match(classNewPage, /createClass/);
+  assert.match(classEditPage, /updateClass/);
+  assert.match(classProfilePage, /student_enrollments/);
+  assert.match(classProfilePage, /deleteClass/);
+  assert.doesNotMatch(classesPage + classNewPage + classEditPage + classProfilePage, /student_finance|student_payments|student_charges|billing_plans/i);
+  assert.match(studentEditPage, /StudentClassAssignment/);
+  assert.match(studentEditPage, /createNewClass: submitForm\.classAssignmentMode === "new"/);
+  assert.match(classManagementSql, /create or replace function public\.create_class_mvp/);
+  assert.match(classManagementSql, /create or replace function public\.update_class_mvp/);
+  assert.match(classManagementSql, /create or replace function public\.assign_student_to_class_mvp/);
+  assert.match(classManagementSql, /p_existing_class_id is not null and p_create_new_class/);
+  assert.doesNotMatch(
+    classManagementSql.match(/create or replace function public\.assign_student_to_class_mvp[\s\S]*?revoke all on function public\.assign_student_to_class_mvp/)?.[0] || "",
+    /update public\.classes/
+  );
+});
+
+test("safe class deletion blocks enrollment history and avoids cascade deletes", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+
+  assert.match(classSafeDeleteSql, /create or replace function public\.delete_class_mvp/);
+  assert.match(classSafeDeleteSql, /security definer/);
+  assert.match(classSafeDeleteSql, /for update/);
+  assert.match(classSafeDeleteSql, /public\.can_manage_school\(v_class\.school_id\)/);
+  assert.match(classSafeDeleteSql, /from public\.student_enrollments se[\s\S]*where se\.class_id = p_class_id/);
+  assert.match(classSafeDeleteSql, /student enrollment history/);
+  assert.match(classSafeDeleteSql, /delete from public\.classes/);
+  assert.match(classSafeDeleteSql, /foreign_key_violation/);
+  assert.doesNotMatch(classSafeDeleteSql, /delete from public\.student_enrollments|on delete cascade/i);
+  assert.match(dataSource, /deleteClass/);
+  assert.match(dataSource, /delete_class_mvp/);
+  assert.match(classDeleteDialog, /Delete class\?/);
+  assert.match(classDeleteDialog, /This action cannot be undone/);
+  assert.match(classDeleteDialog, /Enrolled student history/);
+  assert.match(classDeleteDialog, /getClassEnrollmentCount/);
+  assert.match(classDeleteDialog, /hasEnrollmentHistory/);
+  assert.match(classDeleteDialog, /Deactivate class/);
+  assert.match(classDeleteDialog, /!hasEnrollmentHistory/);
+  assert.match(classDeleteDialog, /onDeactivate/);
+  assert.match(classDeleteDialog, /You can deactivate the class instead/);
+  assert.match(classesPage + classProfilePage, /updateClass/);
+  assert.match(classesPage + classProfilePage, /status: "inactive"/);
 });
 
 test("staff teacher migration separates HR identity from authorization roles", () => {
@@ -1633,8 +1737,12 @@ test("student contact records prefill the shared contact editor", () => {
 });
 
 test("student edit workflow is routed and backed by an atomic RPC", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+
   assert.match(studentProfilePage, /href=\{`\/students\/edit\/\?id=\$\{student\.id\}`\}/);
   assert.match(studentEditPage, /updateStudent\(supabase/);
+  assert.match(dataSource, /create_student_with_class_assignment_mvp/);
+  assert.match(dataSource, /update_student_with_class_assignment_mvp/);
   assert.match(updateStudentSql, /create or replace function public\.update_student_mvp/);
   assert.match(updateStudentSql, /delete from public\.student_contacts/);
   assert.match(updateStudentSql, /delete from public\.student_guardians/);
@@ -1682,6 +1790,8 @@ test("student edit state preserves relational form values", () => {
   });
 
   assert.equal(editState.form.ageOverride, "8");
+  assert.equal(editState.form.classAssignmentMode, "existing");
+  assert.equal(editState.form.classId, "class-1");
   assert.equal(editState.form.assignedTeacherProfileId, "teacher-1");
   assert.equal(editState.form.lessonTime, "16:30");
   assert.equal(editState.guardians[0].notes, "Pickup allowed");

@@ -127,14 +127,14 @@ export default function SettingsPage() {
 
         <DataSurface as="article">
           <SurfaceHeader>
-            <h2>Billing Plans</h2>
+            <h2>Lesson Packages</h2>
           </SurfaceHeader>
           <dl className="detail-list">
             <div>
               <dt>Student finance</dt>
               <dd>
                 <Link className="secondary-button" href="/settings/billing-plans/">
-                  Manage Billing Plans
+                  Manage Lesson Packages
                 </Link>
               </dd>
             </div>

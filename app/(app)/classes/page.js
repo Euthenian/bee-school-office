@@ -228,7 +228,7 @@ export default function ClassesPage() {
                   <th>Teacher</th>
                   <th>Status</th>
                   <th>Students</th>
-                  <th>Actions</th>
+                  <th className="classes-actions-column">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -247,8 +247,8 @@ export default function ClassesPage() {
                       <StatusBadge value={classRow.status} />
                     </td>
                     <td>{getClassActiveStudentCount(classRow)}</td>
-                    <td>
-                      <div className="table-actions">
+                    <td className="classes-actions-cell">
+                      <div className="table-actions classes-row-actions">
                         <Link className="secondary-button" href={`/classes/profile/?id=${classRow.id}`}>
                           View
                         </Link>

@@ -1291,6 +1291,26 @@ dd {
   gap: 6px;
 }
 
+.classes-actions-column,
+.classes-actions-cell {
+  min-width: 214px;
+  white-space: nowrap;
+}
+
+.classes-row-actions {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.classes-row-actions .secondary-button,
+.classes-row-actions .danger-button {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 .table-cell-stack,
 .follow-up-lines {
   display: grid;

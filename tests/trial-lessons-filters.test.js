@@ -7,6 +7,7 @@ import {
   defaultTrialLessonSort,
   filterAndSortTrialLessons,
   formatUpcomingTrialLessonDate,
+  getMissingTrialLessonConversionFields,
   getNearestUpcomingTrialLesson,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
@@ -14,6 +15,7 @@ import {
 } from "../lib/trial-lessons.js";
 
 const trialLessonsPage = readFileSync(new URL("../app/(app)/trial-lessons/page.js", import.meta.url), "utf8");
+const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
 const today = "2026-09-09";
 
 function trialLesson(id, overrides = {}) {
@@ -138,6 +140,19 @@ test("nearest upcoming trial lesson pill uses the next scheduled trial date and 
   assert.match(trialLessonsPage, /Upcoming Trial Lesson &middot;/);
 });
 
+test("upcoming trial lessons include Sep 25 set schedules and exclude past Sep 17 rows", () => {
+  const rows = [
+    trialLesson("past-preference", { trial_date: "2026-09-17", trial_time: "18:00:00" }),
+    trialLesson("set-schedule", { trial_date: "2026-09-25", trial_time: "18:00:00" })
+  ];
+  const nearest = getNearestUpcomingTrialLesson(rows, "2026-09-18");
+
+  assert.equal(nearest.id, "set-schedule");
+  assert.equal(formatUpcomingTrialLessonDate(nearest), "Sep 25");
+  assert.match(trialLessonsPage, /scope: \["upcoming", "needs_follow_up"\]\.includes\(statusFilter\) \? statusFilter : ""/);
+  assert.match(dataSource, /if \(filters\.scope === "upcoming"\) \{\s+query = query\.gte\("trial_date", new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\);/);
+});
+
 test("trial lesson name sorting and contains filter use displayed prospect and participant names", () => {
   const rows = [
     trialLesson("bravo", {
@@ -204,6 +219,16 @@ test("trial lesson clear-all resets column filters and primary sort", () => {
   assert.equal(hasActiveTrialLessonColumnFilters(reset.columnFilters), false);
   assert.equal(hasActiveTrialLessonSort(reset.sort), false);
   assert.match(trialLessonsPage, /Clear all filters/);
+});
+
+test("trial lesson conversion details report only missing required fields", () => {
+  assert.deepEqual(getMissingTrialLessonConversionFields(trialLesson("complete")), []);
+  assert.deepEqual(
+    getMissingTrialLessonConversionFields(trialLesson("missing-both", { lesson_type: null, class_levels: null, level_id: null })),
+    ["lessonType", "levelId"]
+  );
+  assert.deepEqual(getMissingTrialLessonConversionFields(trialLesson("missing-type", { lesson_type: null })), ["lessonType"]);
+  assert.deepEqual(getMissingTrialLessonConversionFields(trialLesson("missing-level", { class_levels: null, level_id: null })), ["levelId"]);
 });
 
 test("trial lesson column filters layer on fetched rows and leave actions unfiltered", () => {

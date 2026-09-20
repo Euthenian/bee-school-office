@@ -13,7 +13,10 @@ test("bulk selection is ID-based and visible-rows-aware", () => {
   assert.ok(trialLessonsPage.includes("const [selectedTrialLessonIds, setSelectedTrialLessonIds] = useState(() => new Set());"));
   assert.ok(trialLessonsPage.includes("const ids = [...deletingIds];"));
   assert.ok(trialLessonsPage.includes("const validSelectedTrialLessonIds = useMemo(() => {"));
-  assert.ok(trialLessonsPage.includes("state.trialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)),\n    [state.trialLessons, validSelectedTrialLessonIds]"));
+  assert.match(
+    trialLessonsPage,
+    /state\.trialLessons\.filter\(\(trialLesson\) => validSelectedTrialLessonIds\.has\(trialLesson\.id\)\),\r?\n\s+\[state\.trialLessons, validSelectedTrialLessonIds\]/
+  );
   assert.ok(trialLessonsPage.includes("const selectedTrialLessonCount = validSelectedTrialLessonIds.size;"));
   assert.ok(trialLessonsPage.includes("visibleSelectedTrialLessonCount"));
   assert.ok(trialLessonsPage.includes("for (const lesson of visibleTrialLessons)"));

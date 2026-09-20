@@ -136,6 +136,14 @@ const pendingTrialBookingConversionSql = readFileSync(
   new URL("../supabase/migrations/20260826008000_pending_trial_booking_conversion.sql", import.meta.url),
   "utf8"
 );
+const pendingTrialBookingSetScheduleSql = readFileSync(
+  new URL("../supabase/migrations/20260918001000_trial_booking_import_set_schedule.sql", import.meta.url),
+  "utf8"
+);
+const trialLessonMissingParticipantConversionSql = readFileSync(
+  new URL("../supabase/migrations/20260920001000_trial_lesson_missing_participant_conversion.sql", import.meta.url),
+  "utf8"
+);
 const gmailTrialBookingCronHealthSql = readFileSync(
   new URL("../supabase/migrations/20260828001000_gmail_trial_booking_cron_health.sql", import.meta.url),
   "utf8"
@@ -1085,6 +1093,12 @@ test("trial lessons surface pending booking review and conversion through the at
   assert.match(pendingTrialBookingReviewPage, /convertPendingTrialBookingImport/);
   assert.match(pendingTrialBookingReviewPage, /fetchPendingTrialBookingProspectCandidates/);
   assert.match(pendingTrialBookingReviewPage, /Create Trial Lesson/);
+  assert.match(pendingTrialBookingReviewPage, /Set Date/);
+  assert.match(pendingTrialBookingReviewPage, /Set Time/);
+  assert.match(pendingTrialBookingReviewPage, /Use first preference/);
+  assert.match(pendingTrialBookingReviewPage, /Use second preference/);
+  assert.match(pendingTrialBookingReviewPage, /pendingImport\.review_status === "reviewed" && pendingImport\.parse_status === "parsed" && !alreadyConverted/);
+  assert.match(pendingTrialBookingReviewPage, /conversionForm\.trialDate &&\s+conversionForm\.trialTime/);
   assert.doesNotMatch(pendingTrialBookingsPage, /createTrialLesson|create_trial_lesson_mvp|from\("trial_lessons"\)|from\("prospects"\)/);
   assert.doesNotMatch(pendingTrialBookingReviewPage, /from\("trial_lessons"\)|from\("prospects"\)|from\("prospect_contacts"\)/);
 });
@@ -1136,7 +1150,7 @@ test("pending booking list dismisses one pending import through existing review 
   assert.equal(calls.some((call) => call.method === "delete"), false);
 });
 
-test("sidebar trial lessons badge reuses the pending review count", () => {
+test("sidebar trial lessons badge reuses the actionable pending booking count", () => {
   assert.equal(formatCountBadgeValue(0), "");
   assert.equal(formatCountBadgeValue(null), "");
   assert.equal(formatCountBadgeValue(1), "1");
@@ -1144,19 +1158,23 @@ test("sidebar trial lessons badge reuses the pending review count", () => {
   assert.equal(formatCountBadgeValue(100), "99+");
 
   assert.match(adminShell, /fetchPendingTrialBookingImportCount/);
-  assert.match(adminShell, /reviewStatus: "pending_review"/);
+  assert.match(adminShell, /reviewStatus: "needs_action"/);
   assert.match(adminShell, /item\.href === "\/trial-lessons\/"/);
   assert.match(adminShell, /className="nav-count-badge"/);
   assert.match(adminShell, /\{badgeValue \? <span className="nav-count-badge">\{badgeValue\}<\/span> : null\}/);
 });
 
-test("pending booking count helper targets only pending review rows", () => {
+test("pending booking count helper targets unconverted actionable rows", () => {
   const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
 
   assert.match(dataSource, /fetchPendingTrialBookingImportCount/);
   assert.match(dataSource, /\.from\("pending_trial_booking_imports"\)/);
   assert.match(dataSource, /\.select\("id", \{ count: "exact", head: true \}\)/);
-  assert.match(dataSource, /\.eq\("review_status", filters\.reviewStatus\)/);
+  assert.match(dataSource, /filters\.reviewStatus === "needs_action"/);
+  assert.match(dataSource, /\.in\("review_status", \["pending_review", "reviewed"\]\)\.is\("converted_trial_lesson_id", null\)/);
+  assert.match(pendingTrialBookingsPage, /useState\("needs_action"\)/);
+  assert.match(pendingTrialBookingsPage, /\{ value: "needs_action", label: "Needs action" \}/);
+  assert.match(trialLessonsPage, /reviewStatus: "needs_action"/);
 });
 
 test("Gmail Trial Booking cron health uses native cron and net histories safely", () => {
@@ -1254,6 +1272,8 @@ test("pending booking review select and patch protect source metadata", () => {
     "trial_type",
     "course",
     "lesson_type",
+    "set_date",
+    "set_time",
     "raw_body",
     "parse_status",
     "parse_error",
@@ -1280,8 +1300,10 @@ test("pending booking review select and patch protect source metadata", () => {
     lesson_type: "グループレッスン",
     first_preferred_date: "2026-08-27T00:00:00.000Z",
     first_preferred_time: "18:30:00",
-    second_preferred_date: "",
-    second_preferred_time: "",
+    second_preferred_date: "2026-09-03T00:00:00.000Z",
+    second_preferred_time: "19:00:00",
+    set_date: "2026-09-10T00:00:00.000Z",
+    set_time: "20:15:00",
     customer_message: "  Please confirm.  "
   });
 
@@ -1293,6 +1315,10 @@ test("pending booking review select and patch protect source metadata", () => {
   assert.equal(patch.lesson_type, "グループレッスン");
   assert.equal(patch.first_preferred_date, "2026-08-27");
   assert.equal(patch.first_preferred_time, "18:30");
+  assert.equal(patch.second_preferred_date, "2026-09-03");
+  assert.equal(patch.second_preferred_time, "19:00");
+  assert.equal(patch.set_date, "2026-09-10");
+  assert.equal(patch.set_time, "20:15");
   assert.equal(patch.review_status, "reviewed");
   assert.equal("gmail_message_id" in patch, false);
   assert.equal("source_mailbox" in patch, false);
@@ -1320,6 +1346,57 @@ test("pending booking conversion migration adds traceability and atomic conversi
   assert.match(pendingTrialBookingConversionSql, /Imported course text is not mapped automatically/);
   assert.match(pendingTrialBookingConversionSql, /grant execute on function public\.convert_pending_trial_booking_import_to_trial_lesson/);
   assert.match(pendingTrialBookingConversionSql, /from public, anon/);
+});
+
+test("pending booking set schedule is independent from preferred source dates", () => {
+  const sourcePreferences = {
+    first_preferred_date: "2026-09-17",
+    first_preferred_time: "18:00",
+    second_preferred_date: "2026-09-25",
+    second_preferred_time: "18:00"
+  };
+
+  const firstSchedulePatch = buildPendingTrialBookingReviewPatch({
+    student_name: "Reschedule Example",
+    ...sourcePreferences,
+    set_date: "2026-09-17",
+    set_time: "18:00"
+  });
+  const secondSchedulePatch = buildPendingTrialBookingReviewPatch({
+    student_name: "Reschedule Example",
+    ...sourcePreferences,
+    set_date: "2026-09-25",
+    set_time: "18:00"
+  });
+  const manualSchedulePatch = buildPendingTrialBookingReviewPatch({
+    student_name: "Reschedule Example",
+    ...sourcePreferences,
+    set_date: "2026-09-30",
+    set_time: "19:15"
+  });
+
+  assert.equal(firstSchedulePatch.first_preferred_date, "2026-09-17");
+  assert.equal(firstSchedulePatch.second_preferred_date, "2026-09-25");
+  assert.equal(firstSchedulePatch.set_date, "2026-09-17");
+  assert.equal(secondSchedulePatch.first_preferred_date, "2026-09-17");
+  assert.equal(secondSchedulePatch.second_preferred_date, "2026-09-25");
+  assert.equal(secondSchedulePatch.set_date, "2026-09-25");
+  assert.equal(manualSchedulePatch.first_preferred_date, "2026-09-17");
+  assert.equal(manualSchedulePatch.second_preferred_date, "2026-09-25");
+  assert.equal(manualSchedulePatch.set_date, "2026-09-30");
+  assert.equal(manualSchedulePatch.set_time, "19:15");
+});
+
+test("pending booking set schedule migration drives conversion date and time", () => {
+  assert.match(pendingTrialBookingSetScheduleSql, /add column if not exists set_date date/);
+  assert.match(pendingTrialBookingSetScheduleSql, /add column if not exists set_time time/);
+  assert.match(pendingTrialBookingSetScheduleSql, /v_trial_date = coalesce\(p_trial_date, v_import\.set_date\)/);
+  assert.match(pendingTrialBookingSetScheduleSql, /v_trial_time = coalesce\(p_trial_time, v_import\.set_time\)/);
+  assert.match(pendingTrialBookingSetScheduleSql, /Set Date is required before conversion/);
+  assert.match(pendingTrialBookingSetScheduleSql, /Set Time is required before conversion/);
+  assert.match(pendingTrialBookingSetScheduleSql, /set set_date = v_trial_date,\s+set_time = v_trial_time/);
+  assert.doesNotMatch(pendingTrialBookingSetScheduleSql, /v_import\.first_preferred_date/);
+  assert.doesNotMatch(pendingTrialBookingSetScheduleSql, /v_import\.first_preferred_time/);
 });
 
 test("pending booking prospect candidates use normalized contacts and names", () => {
@@ -1543,4 +1620,62 @@ test("converted trial lessons link by stored student id without redundant action
   assert.match(trialLessonsPage, /href=\{`\/students\/profile\/\?id=\$\{linkedStudentId\}`\}/);
   assert.match(trialLessonsPage, /aria-label="View student"/);
   assert.match(trialLessonsPage, /<ActionIcon name="eye" \/>/);
+});
+
+test("trial lesson actions distinguish booking confirmation from student conversion", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+
+  assert.match(trialLessonsPage, /trialLesson\.status !== "booked"/);
+  assert.match(trialLessonsPage, /!conversionParticipants\.length/);
+  assert.match(trialLessonsPage, /trialLesson\.status === "booked"/);
+  assert.match(trialLessonsPage, /trialLesson\.trial_date < todayKey/);
+  assert.match(trialLessonsPage, /aria-label="Convert prospect to student"/);
+  assert.match(trialLessonsPage, /Convert to student/);
+  assert.match(trialLessonsPage, /getMissingTrialLessonConversionFields\(trialLesson\)/);
+  assert.match(trialLessonsPage, /setConversionCompletion\(\{/);
+  assert.match(trialLessonsPage, /function ConversionCompletionDialog/);
+  assert.match(trialLessonsPage, /needsLessonType \? \(/);
+  assert.match(trialLessonsPage, /needsLevel \? \(/);
+  assert.match(trialLessonsPage, /onCancel=\{handleConversionCompletionCancel\}/);
+  assert.match(trialLessonsPage, /updateTrialLessonConversionDetails\(supabase/);
+  assert.match(trialLessonsPage, /await convertTrialLessonProspect\(supabase, trialLessonId\)/);
+  assert.match(dataSource, /convert_trial_lesson_prospect_to_student/);
+  assert.match(dataSource, /update_trial_lesson_conversion_details_mvp/);
+});
+
+test("missing trial participant conversion repairs only the participant link before existing conversion", () => {
+  assert.match(
+    trialLessonMissingParticipantConversionSql,
+    /create or replace function public\.update_trial_lesson_conversion_details_mvp/
+  );
+  assert.match(trialLessonMissingParticipantConversionSql, /p_lesson_type public\.class_lesson_type default null/);
+  assert.match(trialLessonMissingParticipantConversionSql, /p_level_id text default null/);
+  assert.match(trialLessonMissingParticipantConversionSql, /if v_lesson_type is null then/);
+  assert.match(trialLessonMissingParticipantConversionSql, /if v_level_id is null then/);
+  assert.match(trialLessonMissingParticipantConversionSql, /from public\.class_levels cl[\s\S]*cl\.status = 'active'/);
+  assert.match(trialLessonMissingParticipantConversionSql, /update public\.trial_lessons[\s\S]*lesson_type = v_lesson_type/);
+  assert.match(trialLessonMissingParticipantConversionSql, /level_id = v_level_id/);
+  assert.match(trialLessonMissingParticipantConversionSql, /create or replace function public\.convert_trial_lesson_prospect_to_student/);
+  assert.match(trialLessonMissingParticipantConversionSql, /from public\.trial_lessons tl[\s\S]*for update/);
+  assert.match(
+    trialLessonMissingParticipantConversionSql,
+    /if v_trial\.converted_student_id is not null then[\s\S]*return v_trial\.converted_student_id/
+  );
+  assert.match(trialLessonMissingParticipantConversionSql, /if v_trial\.lesson_type is null or v_trial\.level_id is null then/);
+  assert.match(trialLessonMissingParticipantConversionSql, /from public\.prospects pr[\s\S]*pr\.id = v_trial\.prospect_id/);
+  assert.match(
+    trialLessonMissingParticipantConversionSql,
+    /select count\(\*\)::integer into v_participant_count[\s\S]*from public\.trial_lesson_participants/
+  );
+  assert.match(trialLessonMissingParticipantConversionSql, /insert into public\.trial_lesson_participants/);
+  assert.match(
+    trialLessonMissingParticipantConversionSql,
+    /return public\.convert_trial_lesson_participant_to_student\(v_trial\.id, v_participant_id, p_start_date\)/
+  );
+  assert.doesNotMatch(trialLessonMissingParticipantConversionSql, /insert into public\.prospects/);
+  assert.doesNotMatch(trialLessonMissingParticipantConversionSql, /insert into public\.students/);
+  assert.match(
+    trialLessonMissingParticipantConversionSql,
+    /grant execute on function public\.convert_trial_lesson_prospect_to_student\(uuid, date\) to authenticated/
+  );
 });

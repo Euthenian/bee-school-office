@@ -72,7 +72,7 @@ export function AdminShell({ children }) {
 
       const [pendingTrialBookings, dueQuestions, pendingFinancialDocuments, openTodos] = await Promise.all([
         mayManageTrialLessons
-          ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "pending_review" })
+          ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "needs_action" })
           : { count: 0, error: null },
         mayManageStudentQuestions ? fetchStudentQuestionBadgeCount(supabase) : { count: 0, error: null },
         mayManageFinancialDocuments ? fetchFinancialDocumentBadgeCount(supabase) : { count: 0, error: null },

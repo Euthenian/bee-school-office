@@ -17,6 +17,10 @@ const pendingImportCourseSql = readFileSync(
   new URL("../supabase/migrations/20260826007000_pending_trial_booking_imports_course.sql", import.meta.url),
   "utf8"
 );
+const pendingImportSetScheduleSql = readFileSync(
+  new URL("../supabase/migrations/20260918001000_trial_booking_import_set_schedule.sql", import.meta.url),
+  "utf8"
+);
 
 const baseInput = {
   organizationId: "11111111-1111-4111-8111-111111111111",
@@ -128,6 +132,8 @@ test("missing optional second preferred fields stays cleanly nullable", () => {
   assert.equal(row.parse_status, "parsed");
   assert.equal(row.second_preferred_date, null);
   assert.equal(row.second_preferred_time, null);
+  assert.equal("set_date" in row, false);
+  assert.equal("set_time" in row, false);
 });
 
 test("missing required booking identification returns explicit parse error", () => {
@@ -168,4 +174,7 @@ test("pending import migration preserves RLS and Gmail message idempotency", () 
   assert.match(pendingImportSql, /using \(public\.can_manage_school\(school_id\)\)/);
   assert.match(pendingImportSql, /public\.can_access_org\(organization_id\)/);
   assert.match(pendingImportCourseSql, /add column if not exists course text/);
+  assert.match(pendingImportSetScheduleSql, /add column if not exists set_date date/);
+  assert.match(pendingImportSetScheduleSql, /add column if not exists set_time time/);
+  assert.match(pendingImportSetScheduleSql, /does not replace first\/second preferred source dates/);
 });

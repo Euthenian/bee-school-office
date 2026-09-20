@@ -32,6 +32,8 @@ const emptyForm = {
   first_preferred_time: "",
   second_preferred_date: "",
   second_preferred_time: "",
+  set_date: "",
+  set_time: "",
   customer_message: ""
 };
 
@@ -151,6 +153,17 @@ function PendingTrialBookingReviewContent() {
       ...(field === "prospectChoice" && value === "new" ? { prospectId: "" } : {}),
       ...(field === "prospectId" ? { prospectChoice: "existing" } : {})
     }));
+    if (field === "trialDate") {
+      setForm((current) => ({ ...current, set_date: value }));
+    }
+    if (field === "trialTime") {
+      setForm((current) => ({ ...current, set_time: value }));
+    }
+  }
+
+  function applyPreferredSchedule(date, time) {
+    setForm((current) => ({ ...current, set_date: date || "", set_time: time || "" }));
+    setConversionForm((current) => ({ ...current, trialDate: date || "", trialTime: time || "" }));
   }
 
   async function reloadPendingImport(supabase, successMessage, result = null) {
@@ -378,6 +391,40 @@ function PendingTrialBookingReviewContent() {
                 value={form.second_preferred_time}
               />
             </label>
+            <label>
+              Set Date
+              <input
+                onChange={(event) => applyPreferredSchedule(event.target.value, form.set_time)}
+                type="date"
+                value={form.set_date}
+              />
+            </label>
+            <label>
+              Set Time
+              <input
+                onChange={(event) => applyPreferredSchedule(form.set_date, event.target.value)}
+                type="time"
+                value={form.set_time}
+              />
+            </label>
+          </div>
+          <div className="form-actions">
+            <button
+              className="secondary-button"
+              disabled={!form.first_preferred_date && !form.first_preferred_time}
+              onClick={() => applyPreferredSchedule(form.first_preferred_date, form.first_preferred_time)}
+              type="button"
+            >
+              Use first preference
+            </button>
+            <button
+              className="secondary-button"
+              disabled={!form.second_preferred_date && !form.second_preferred_time}
+              onClick={() => applyPreferredSchedule(form.second_preferred_date, form.second_preferred_time)}
+              type="button"
+            >
+              Use second preference
+            </button>
           </div>
           <div className="form-grid single-column">
             <label>
@@ -400,6 +447,7 @@ function PendingTrialBookingReviewContent() {
           converting={converting}
           onConvert={handleConvert}
           onUpdate={updateConversionField}
+          onUsePreference={applyPreferredSchedule}
           pendingImport={pendingImport}
           prospectCandidates={prospectCandidates}
         />
@@ -449,6 +497,7 @@ function ConversionPanel({
   converting,
   onConvert,
   onUpdate,
+  onUsePreference,
   pendingImport,
   prospectCandidates
 }) {
@@ -489,11 +538,11 @@ function ConversionPanel({
         <>
           <div className="form-grid">
             <label>
-              Trial date
+              Set Date
               <input onChange={(event) => onUpdate("trialDate", event.target.value)} required type="date" value={conversionForm.trialDate} />
             </label>
             <label>
-              Trial time
+              Set Time
               <input onChange={(event) => onUpdate("trialTime", event.target.value)} required type="time" value={conversionForm.trialTime} />
             </label>
             <label>
@@ -528,8 +577,28 @@ function ConversionPanel({
               <span>Source lesson type: {pendingImport.lesson_type || "Not set"}</span>
               <span>Email: {pendingImport.email || "Not set"}</span>
               <span>Phone: {pendingImport.phone || "Not set"}</span>
+              <span>First choice: {pendingImport.first_preferred_date || "Not set"} {pendingImport.first_preferred_time || ""}</span>
               <span>Second choice: {pendingImport.second_preferred_date || "Not set"} {pendingImport.second_preferred_time || ""}</span>
+              <span>Set schedule: {conversionForm.trialDate || "Not set"} {conversionForm.trialTime || ""}</span>
             </article>
+          </div>
+          <div className="form-actions">
+            <button
+              className="secondary-button"
+              disabled={!pendingImport.first_preferred_date && !pendingImport.first_preferred_time}
+              onClick={() => onUsePreference(pendingImport.first_preferred_date, pendingImport.first_preferred_time)}
+              type="button"
+            >
+              Use first preference
+            </button>
+            <button
+              className="secondary-button"
+              disabled={!pendingImport.second_preferred_date && !pendingImport.second_preferred_time}
+              onClick={() => onUsePreference(pendingImport.second_preferred_date, pendingImport.second_preferred_time)}
+              type="button"
+            >
+              Use second preference
+            </button>
           </div>
 
           <ProspectChoice
@@ -649,6 +718,8 @@ function createFormState(pendingImport) {
     first_preferred_time: timeInputValue(pendingImport.first_preferred_time),
     second_preferred_date: dateInputValue(pendingImport.second_preferred_date),
     second_preferred_time: timeInputValue(pendingImport.second_preferred_time),
+    set_date: dateInputValue(pendingImport.set_date),
+    set_time: timeInputValue(pendingImport.set_time),
     customer_message: pendingImport.customer_message || ""
   };
 }
@@ -662,8 +733,8 @@ function createConversionFormState(pendingImport, prospectCandidates = []) {
     levelId: "",
     prospectChoice: prospectCandidates.length ? "" : "new",
     prospectId: "",
-    trialDate: dateInputValue(pendingImport.first_preferred_date),
-    trialTime: timeInputValue(pendingImport.first_preferred_time)
+    trialDate: dateInputValue(pendingImport.set_date),
+    trialTime: timeInputValue(pendingImport.set_time)
   };
 }
 

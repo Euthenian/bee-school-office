@@ -13,8 +13,10 @@ import { canManageTrialLessons } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const reviewStatusOptions = [
+  { value: "needs_action", label: "Needs action" },
   { value: "pending_review", label: "Pending review" },
   { value: "reviewed", label: "Reviewed" },
+  { value: "converted", label: "Converted" },
   { value: "dismissed", label: "Dismissed" },
   { value: "all", label: "All imports" }
 ];
@@ -24,7 +26,7 @@ export default function PendingTrialBookingImportsPage() {
   const [discardTarget, setDiscardTarget] = useState(null);
   const [discardingId, setDiscardingId] = useState("");
   const [search, setSearch] = useState("");
-  const [reviewStatus, setReviewStatus] = useState("pending_review");
+  const [reviewStatus, setReviewStatus] = useState("needs_action");
   const [state, setState] = useState({ loading: true, error: "", imports: [] });
   const mayManage = canManageTrialLessons(profile);
 

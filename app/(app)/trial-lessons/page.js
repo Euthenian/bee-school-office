@@ -16,18 +16,21 @@ import {
   getDefaultTrialLessonEmail,
   getDefaultTrialLessonPhone
 } from "@/lib/communication-templates";
-import { formatLessonTime, formatLessonType, formatTeacherName } from "@/lib/class-details";
+import { formatLessonTime, formatLessonType, formatTeacherName, lessonTypes } from "@/lib/class-details";
 import {
   confirmTrialLesson,
   convertTrialLessonParticipant,
+  convertTrialLessonProspect,
   queueCommunication,
   deleteTrialLessons,
   deleteTrialLesson,
+  fetchClassLevels,
   fetchPendingTrialBookingImportCount,
   fetchSchoolTeachers,
   fetchSchools,
   fetchTrialLessons,
-  markTrialLessonPhoneFollowUpComplete
+  markTrialLessonPhoneFollowUpComplete,
+  updateTrialLessonConversionDetails
 } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
@@ -42,6 +45,7 @@ import {
   formatUpcomingTrialLessonDate,
   getNearestUpcomingTrialLesson,
   getLocalDateKey,
+  getMissingTrialLessonConversionFields,
   getPrimaryParticipant,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
@@ -61,6 +65,7 @@ export default function TrialLessonsPage() {
   const [schoolFilter, setSchoolFilter] = useState("");
   const [teacherFilter, setTeacherFilter] = useState("");
   const [schools, setSchools] = useState([]);
+  const [classLevels, setClassLevels] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [state, setState] = useState({ loading: true, error: "", trialLessons: [] });
   const [pendingState, setPendingState] = useState({ loading: true, count: 0 });
@@ -69,6 +74,7 @@ export default function TrialLessonsPage() {
   const [bulkCommunicatingTrialLessons, setBulkCommunicatingTrialLessons] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
+  const [conversionCompletion, setConversionCompletion] = useState(null);
   const [confirmingId, setConfirmingId] = useState("");
   const [convertingId, setConvertingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
@@ -84,22 +90,24 @@ export default function TrialLessonsPage() {
   useEffect(() => {
     let active = true;
 
-    async function loadSchools() {
+    async function loadFoundation() {
       const supabase = getSupabaseBrowserClient();
       if (!supabase || !session) return;
 
-      const { data, error } = await fetchSchools(supabase);
+      const [schoolsResult, levelsResult] = await Promise.all([fetchSchools(supabase), fetchClassLevels(supabase)]);
       if (!active) return;
 
-      if (error) {
-        setState((current) => ({ ...current, error: error.message }));
+      if (schoolsResult.error || levelsResult.error) {
+        setState((current) => ({ ...current, error: schoolsResult.error?.message || levelsResult.error?.message }));
         setSchools([]);
+        setClassLevels([]);
       } else {
-        setSchools(data || []);
+        setSchools(schoolsResult.data || []);
+        setClassLevels(levelsResult.data || []);
       }
     }
 
-    loadSchools();
+    loadFoundation();
 
     return () => {
       active = false;
@@ -151,7 +159,7 @@ export default function TrialLessonsPage() {
       };
       const [trialLessonsResult, pendingBookingsResult] = await Promise.all([
         fetchTrialLessons(supabase, filters),
-        mayManage ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "pending_review" }) : { count: 0, error: null }
+        mayManage ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "needs_action" }) : { count: 0, error: null }
       ]);
       if (!active) return;
 
@@ -271,8 +279,25 @@ export default function TrialLessonsPage() {
     setTableSort(reset.sort);
   }
 
-  async function handleConvert(trialLessonId, participantId) {
-    setConvertingId(participantId);
+  async function handleConvert(trialLesson, participantId = "") {
+    const trialLessonId = typeof trialLesson === "string" ? trialLesson : trialLesson.id;
+    const conversionKey = participantId || `prospect:${trialLessonId}`;
+    if (!participantId && typeof trialLesson !== "string") {
+      const missingFields = getMissingTrialLessonConversionFields(trialLesson);
+      if (missingFields.length) {
+        setConversionCompletion({
+          converting: false,
+          error: "",
+          levelId: trialLesson.level_id || trialLesson.class_levels?.id || "",
+          lessonType: trialLesson.lesson_type || "",
+          missingFields,
+          trialLesson
+        });
+        return;
+      }
+    }
+
+    setConvertingId(conversionKey);
     setState((current) => ({ ...current, error: "" }));
 
     const supabase = getSupabaseBrowserClient();
@@ -282,13 +307,56 @@ export default function TrialLessonsPage() {
       return;
     }
 
-    const { data: studentId, error } = await convertTrialLessonParticipant(supabase, trialLessonId, participantId);
+    const { data: studentId, error } = participantId
+      ? await convertTrialLessonParticipant(supabase, trialLessonId, participantId)
+      : await convertTrialLessonProspect(supabase, trialLessonId);
     if (error) {
       setState((current) => ({ ...current, error: error.message }));
       setConvertingId("");
       return;
     }
 
+    router.push(`/students/profile/?id=${studentId}`);
+  }
+
+  function handleConversionCompletionCancel() {
+    setConversionCompletion(null);
+  }
+
+  function updateConversionCompletionField(field, value) {
+    setConversionCompletion((current) => (current ? { ...current, [field]: value, error: "" } : current));
+  }
+
+  async function handleConversionCompletionConfirm() {
+    if (!conversionCompletion?.trialLesson) return;
+
+    setConversionCompletion((current) => (current ? { ...current, converting: true, error: "" } : current));
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setConversionCompletion((current) =>
+        current ? { ...current, converting: false, error: "You must be signed in before converting a trial lesson." } : current
+      );
+      return;
+    }
+
+    const trialLessonId = conversionCompletion.trialLesson.id;
+    const detailsResult = await updateTrialLessonConversionDetails(supabase, {
+      trialLessonId,
+      lessonType: conversionCompletion.lessonType,
+      levelId: conversionCompletion.levelId
+    });
+    if (detailsResult.error) {
+      setConversionCompletion((current) => (current ? { ...current, converting: false, error: detailsResult.error.message } : current));
+      return;
+    }
+
+    const { data: studentId, error } = await convertTrialLessonProspect(supabase, trialLessonId);
+    if (error) {
+      setConversionCompletion((current) => (current ? { ...current, converting: false, error: error.message } : current));
+      return;
+    }
+
+    setConversionCompletion(null);
     router.push(`/students/profile/?id=${studentId}`);
   }
 
@@ -637,6 +705,15 @@ export default function TrialLessonsPage() {
           onConfirm={handleDeleteConfirm}
         />
       ) : null}
+      {conversionCompletion ? (
+        <ConversionCompletionDialog
+          classLevels={classLevels}
+          completion={conversionCompletion}
+          onCancel={handleConversionCompletionCancel}
+          onConfirm={handleConversionCompletionConfirm}
+          onUpdate={updateConversionCompletionField}
+        />
+      ) : null}
 
       <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface">
         {state.loading ? (
@@ -822,6 +899,7 @@ export default function TrialLessonsPage() {
                     onOpenComposer={setCommunicatingTrialLesson}
                     onPhoneFollowUpComplete={handlePhoneFollowUpComplete}
                     phoneFollowUpId={phoneFollowUpId}
+                    todayKey={todayKey}
                     trialLesson={trialLesson}
                   />
                 ))}
@@ -1069,6 +1147,7 @@ function TrialLessonRow({
   onPhoneFollowUpComplete,
   onRequestDelete,
   phoneFollowUpId,
+  todayKey,
   trialLesson
 }) {
   const participant = getPrimaryParticipant(trialLesson);
@@ -1081,7 +1160,19 @@ function TrialLessonRow({
   const needsPhoneFollowUp =
     trialLesson.status === "no_show" && !trialLesson.phone_follow_up_completed_at && trialLesson.follow_up_state !== "resolved";
   const canConfirm =
-    !linkedStudentId && !["joined", "cancelled", "did_not_join"].includes(trialLesson.status) && trialLesson.trial_date && trialLesson.trial_time;
+    !linkedStudentId &&
+    trialLesson.status !== "booked" &&
+    !["joined", "cancelled", "did_not_join"].includes(trialLesson.status) &&
+    trialLesson.trial_date &&
+    trialLesson.trial_time;
+  const canConvertMissingParticipant =
+    !linkedStudentId &&
+    !conversionParticipants.length &&
+    Boolean(prospect?.id) &&
+    trialLesson.status === "booked" &&
+    trialLesson.trial_date &&
+    (!todayKey || trialLesson.trial_date < todayKey);
+  const fallbackConversionId = `prospect:${trialLesson.id}`;
 
   return (
     <tr>
@@ -1125,21 +1216,32 @@ function TrialLessonRow({
               >
                 <ActionIcon name="eye" />
               </Link>
-            ) : (
+            ) : conversionParticipants.length ? (
               conversionParticipants.map((item) => (
                 <button
                   aria-label={`Convert ${item.japanese_name}`}
                   className="convert-button action-icon-button"
                   disabled={Boolean(convertingId)}
                   key={item.id}
-                  onClick={() => onConvert(trialLesson.id, item.id)}
+                  onClick={() => onConvert(trialLesson, item.id)}
                   title={convertingId === item.id ? "Converting..." : `Convert ${item.japanese_name}`}
                   type="button"
                 >
                   <ActionIcon name="user-plus" />
                 </button>
               ))
-            )}
+            ) : canConvertMissingParticipant ? (
+              <button
+                aria-label="Convert prospect to student"
+                className="convert-button action-icon-button"
+                disabled={Boolean(convertingId)}
+                onClick={() => onConvert(trialLesson)}
+                title={convertingId === fallbackConversionId ? "Converting..." : "Convert to student"}
+                type="button"
+              >
+                <ActionIcon name="user-plus" />
+              </button>
+            ) : null}
             {canConfirm ? (
               <button
                 aria-label="Confirm trial lesson"
@@ -1348,6 +1450,78 @@ function BulkDeleteTrialLessonDialog({ deleteCount, deleting, error, onCancel, o
           </button>
           <button className="danger-button" disabled={deleting} onClick={onConfirm} type="button">
             {deleting ? "Deleting..." : `Delete ${deleteCount}`}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ConversionCompletionDialog({ classLevels, completion, onCancel, onConfirm, onUpdate }) {
+  const needsLessonType = completion.missingFields.includes("lessonType");
+  const needsLevel = completion.missingFields.includes("levelId");
+  const canConvert = Boolean(completion.lessonType && completion.levelId) && !completion.converting;
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="conversion-completion-description"
+        aria-labelledby="conversion-completion-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="conversion-completion-title">Complete conversion details</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          <p id="conversion-completion-description">Select the remaining class details before creating the student.</p>
+          <div className="form-grid">
+            {needsLessonType ? (
+              <label>
+                Lesson type
+                <select
+                  disabled={completion.converting}
+                  onChange={(event) => onUpdate("lessonType", event.target.value)}
+                  required
+                  value={completion.lessonType}
+                >
+                  <option value="">Select lesson type</option>
+                  {lessonTypes.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {needsLevel ? (
+              <label>
+                Level
+                <select
+                  disabled={completion.converting || !classLevels.length}
+                  onChange={(event) => onUpdate("levelId", event.target.value)}
+                  required
+                  value={completion.levelId}
+                >
+                  <option value="">{classLevels.length ? "Select a level" : "Loading levels..."}</option>
+                  {classLevels.map((level) => (
+                    <option key={level.id} value={level.id}>
+                      {level.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+          {completion.error ? <p className="inline-alert">{completion.error}</p> : null}
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" disabled={completion.converting} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary-button" disabled={!canConvert} onClick={onConfirm} type="button">
+            {completion.converting ? "Converting..." : "Convert to student"}
           </button>
         </div>
       </section>

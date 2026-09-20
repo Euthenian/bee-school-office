@@ -14,14 +14,18 @@ import {
 
 export function StaffEditor({
   cancelHref,
+  identityHeading = "Staff Identity",
   initialAssignments,
   initialForm,
+  assignmentHeading = "School Assignments",
   mode = "create",
   onSubmit,
   organizations,
   profiles,
   schools,
-  submitting
+  submitting,
+  submitLabel = "",
+  teacherMode = false
 }) {
   const [assignmentRows, setAssignmentRows] = useState(initialAssignments);
   const [form, setForm] = useState(initialForm);
@@ -54,6 +58,10 @@ export function StaffEditor({
           };
         }
 
+        if (field === "assigned" && value && teacherMode) {
+          return { ...row, assigned: true, canTeach: true };
+        }
+
         return { ...row, [field]: value };
       })
     );
@@ -78,7 +86,7 @@ export function StaffEditor({
 
       <DataSurface>
         <SurfaceHeader>
-          <h2>Staff Identity</h2>
+          <h2>{identityHeading}</h2>
         </SurfaceHeader>
         <div className="form-grid">
           <label>
@@ -185,7 +193,7 @@ export function StaffEditor({
 
       <DataSurface>
         <SurfaceHeader>
-          <h2>School Assignments</h2>
+          <h2>{assignmentHeading}</h2>
         </SurfaceHeader>
         {!selectedOrganizationId ? (
           <EmptyState title="Select an organization" description="Schools appear after an organization is selected." />
@@ -283,7 +291,7 @@ export function StaffEditor({
           Cancel
         </Link>
         <button className="primary-button" disabled={submitting} type="submit">
-          {submitting ? "Saving..." : mode === "edit" ? "Save changes" : "Create staff member"}
+          {submitting ? "Saving..." : submitLabel || (mode === "edit" ? "Save changes" : "Create staff member")}
         </button>
       </div>
     </form>

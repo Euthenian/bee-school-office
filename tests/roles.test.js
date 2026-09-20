@@ -116,6 +116,13 @@ import {
   validateStaffForm
 } from "../lib/staff.js";
 import {
+  buildEligibleTeacherKeySet,
+  filterTeacherStaff,
+  getTeacherAssignmentStatusLabel,
+  hasCurrentTeacherEligibility,
+  isTeacherStaff
+} from "../lib/teachers.js";
+import {
   createStudentEditState,
   serializeGuardianRows,
   serializeNoteRows,
@@ -195,6 +202,10 @@ const staffPage = readFileSync(new URL("../app/(app)/staff/page.js", import.meta
 const staffNewPage = readFileSync(new URL("../app/(app)/staff/new/page.js", import.meta.url), "utf8");
 const staffEditPage = readFileSync(new URL("../app/(app)/staff/edit/page.js", import.meta.url), "utf8");
 const staffProfilePage = readFileSync(new URL("../app/(app)/staff/profile/page.js", import.meta.url), "utf8");
+const teachersPage = readFileSync(new URL("../app/(app)/teachers/page.js", import.meta.url), "utf8");
+const teacherNewPage = readFileSync(new URL("../app/(app)/teachers/new/page.js", import.meta.url), "utf8");
+const teacherEditPage = readFileSync(new URL("../app/(app)/teachers/edit/page.js", import.meta.url), "utf8");
+const teacherProfilePage = readFileSync(new URL("../app/(app)/teachers/profile/page.js", import.meta.url), "utf8");
 const payrollPage = readFileSync(new URL("../app/(app)/payroll/page.js", import.meta.url), "utf8");
 const payrollPeriodNewPage = readFileSync(new URL("../app/(app)/payroll/periods/new/page.js", import.meta.url), "utf8");
 const payrollPeriodDetailPage = readFileSync(new URL("../app/(app)/payroll/periods/detail/page.js", import.meta.url), "utf8");
@@ -248,7 +259,9 @@ test("staff navigation is limited to administrative and school management roles"
   }).map((item) => item.href);
 
   assert.equal(managerNavigation.includes("/staff/"), true);
+  assert.equal(managerNavigation.includes("/teachers/"), true);
   assert.equal(teacherNavigation.includes("/staff/"), false);
+  assert.equal(teacherNavigation.includes("/teachers/"), false);
   assert.equal(canManageStaff({ school_memberships: [{ role: "school_manager" }] }), true);
   assert.equal(canManageStaff({ school_memberships: [{ role: "teacher" }] }), false);
 });
@@ -423,6 +436,73 @@ test("staff teacher migration separates HR identity from authorization roles", (
   assert.doesNotMatch(teacherOptions, /sm\.role = 'teacher'/);
   assert.match(staffTeachersSql, /public\.has_active_staff_teacher_assignment\(new\.school_id, new\.assigned_teacher_profile_id\)/);
   assert.match(staffTeachersSql, /notify pgrst, 'reload schema'/);
+});
+
+test("teachers section reuses staff eligibility without exposing payroll", () => {
+  const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+  const teacherSource = readFileSync(new URL("../lib/teachers.js", import.meta.url), "utf8");
+  const staffEditor = readFileSync(new URL("../components/StaffEditor.js", import.meta.url), "utf8");
+  const eligibleBySchool = {
+    "school-1": [{ profile_id: "profile-teacher" }]
+  };
+  const eligibleKeys = buildEligibleTeacherKeySet(eligibleBySchool);
+  const teachingSchoolManager = {
+    id: "staff-1",
+    profile_id: "profile-teacher",
+    legal_name: "Teaching Manager",
+    status: "active",
+    staff_school_assignments: [
+      {
+        school_id: "school-1",
+        can_teach: true,
+        status: "active",
+        schools: { name: "Ohashi" }
+      }
+    ]
+  };
+  const nonTeachingStaff = {
+    id: "staff-2",
+    profile_id: "profile-office",
+    legal_name: "Office Staff",
+    status: "active",
+    staff_school_assignments: [
+      {
+        school_id: "school-1",
+        can_teach: false,
+        status: "active",
+        schools: { name: "Ohashi" }
+      }
+    ]
+  };
+
+  assert.equal(isTeacherStaff(teachingSchoolManager, eligibleKeys), true);
+  assert.equal(hasCurrentTeacherEligibility(teachingSchoolManager, eligibleKeys), true);
+  assert.equal(getTeacherAssignmentStatusLabel(teachingSchoolManager, eligibleKeys), "Currently assignable");
+  assert.equal(isTeacherStaff(nonTeachingStaff, eligibleKeys), false);
+  assert.deepEqual(
+    filterTeacherStaff([teachingSchoolManager, nonTeachingStaff], { search: "ohashi", schoolId: "all", status: "all" }, eligibleKeys)
+      .map((staff) => staff.id),
+    ["staff-1"]
+  );
+
+  assert.match(dataSource, /fetchEligibleTeachersBySchools/);
+  assert.match(dataSource, /fetchSchoolTeachers\(supabase, schoolId\)/);
+  assert.match(dataSource, /rpc\("school_teacher_options"/);
+  assert.match(teachersPage, /fetchEligibleTeachersBySchools/);
+  assert.match(teachersPage, /filterTeacherStaff/);
+  assert.match(teachersPage, /\/teachers\/new\//);
+  assert.match(teacherProfilePage, /fetchTeacherAssignedClasses/);
+  assert.match(teacherProfilePage, /fetchTeacherUpcomingTrialLessons/);
+  assert.match(teacherNewPage, /createStaffMember/);
+  assert.match(teacherNewPage, /canTeach: true/);
+  assert.match(teacherEditPage, /updateStaffMember/);
+  assert.match(staffEditor, /teacherMode/);
+  assert.doesNotMatch(teacherSource, /role\s*===\s*"teacher"|role = 'teacher'/);
+
+  for (const pageSource of [teachersPage, teacherNewPage, teacherEditPage, teacherProfilePage]) {
+    assert.doesNotMatch(pageSource, /staff_compensation_terms|fetchStaffCompensationTerms|CompensationTerm|createStaffCompensationTerm/);
+    assert.doesNotMatch(pageSource, /from\("teachers"\)|public\.teachers/);
+  }
 });
 
 test("payroll foundation keeps compensation separate from staff and enables RLS", () => {

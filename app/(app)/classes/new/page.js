@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataSurface } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { buildClassMutation } from "@/lib/classes";
-import { createClass, fetchClassLevels, fetchSchoolTeachers, fetchSchools } from "@/lib/data";
+import { createClass, fetchSchools } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -18,10 +18,8 @@ export default function NewClassPage() {
   const { profile, session } = useAuth();
   const mayManage = canManageClasses(profile);
   const [form, setForm] = useState(() => buildClassMutation());
-  const [foundation, setFoundation] = useState({ classLevels: [], schools: [] });
-  const [teachers, setTeachers] = useState([]);
+  const [foundation, setFoundation] = useState({ schools: [] });
   const [state, setState] = useState({ error: "", loading: true });
-  const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -34,15 +32,15 @@ export default function NewClassPage() {
         return;
       }
 
-      const [schoolsResult, levelsResult] = await Promise.all([fetchSchools(supabase), fetchClassLevels(supabase)]);
+      const schoolsResult = await fetchSchools(supabase);
       if (!active) return;
 
-      const loadError = [schoolsResult.error, levelsResult.error]
+      const loadError = [schoolsResult.error]
         .filter(Boolean)
         .map((error) => error.message)
         .join(" ");
 
-      setFoundation({ classLevels: levelsResult.data || [], schools: schoolsResult.data || [] });
+      setFoundation({ schools: schoolsResult.data || [] });
       setState({ error: loadError, loading: false });
     }
 
@@ -53,48 +51,10 @@ export default function NewClassPage() {
     };
   }, [mayManage, session]);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadTeachers() {
-      setTeachers([]);
-      if (!form.schoolId || !session || !mayManage) {
-        setLoadingTeachers(false);
-        return;
-      }
-
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        setLoadingTeachers(false);
-        return;
-      }
-
-      setLoadingTeachers(true);
-      const { data, error } = await fetchSchoolTeachers(supabase, form.schoolId);
-      if (!active) return;
-
-      if (error) {
-        setState((current) => ({ ...current, error: error.message }));
-      }
-      setTeachers(data || []);
-      setLoadingTeachers(false);
-    }
-
-    loadTeachers();
-
-    return () => {
-      active = false;
-    };
-  }, [form.schoolId, mayManage, session]);
-
   const activeSchools = useMemo(() => foundation.schools.filter((school) => school.status === "active"), [foundation.schools]);
 
   function updateField(field, value) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-      ...(field === "schoolId" ? { assignedTeacherProfileId: "" } : {})
-    }));
+    setForm((current) => ({ ...current, [field]: value }));
   }
 
   async function handleSubmit(event) {
@@ -157,15 +117,12 @@ export default function NewClassPage() {
       <DataSurface>
         <ClassEditor
           cancelHref="/classes/"
-          classLevels={foundation.classLevels}
           form={form}
-          loadingTeachers={loadingTeachers}
           onChange={updateField}
           onSubmit={handleSubmit}
           schools={activeSchools}
           submitLabel="Create class"
           submitting={submitting}
-          teachers={teachers}
         />
       </DataSurface>
     </>

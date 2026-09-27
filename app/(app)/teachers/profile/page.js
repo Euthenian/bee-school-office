@@ -10,7 +10,7 @@ import { DataSurface, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchStaffMember, fetchTeacherAssignedClasses, fetchTeacherUpcomingTrialLessons } from "@/lib/data";
 import { formatLessonDay, formatLessonTime, formatLessonType } from "@/lib/class-details";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatPersonName } from "@/lib/format";
 import { canManageStaff } from "@/lib/roles";
 import { formatStaffName } from "@/lib/staff";
 import { formatProspectName } from "@/lib/trial-lessons";
@@ -55,7 +55,7 @@ function TeacherProfileContent() {
       const staffMember = staffResult.data || null;
       const profileId = staffMember?.profile_id || "";
       const [classesResult, trialLessonsResult] = await Promise.all([
-        fetchTeacherAssignedClasses(supabase, profileId),
+        fetchTeacherAssignedClasses(supabase, staffId),
         fetchTeacherUpcomingTrialLessons(supabase, profileId)
       ]);
       if (!active) return;
@@ -204,8 +204,9 @@ function TeacherProfileContent() {
                     <StatusBadge value={classRow.status} />
                   </div>
                   <span>{classRow.schools?.name || "Unknown school"}</span>
+                  {classRow.students ? <span>{formatPersonName(classRow.students)}</span> : null}
                   <span>
-                    {[formatLessonType(classRow.lesson_type), formatLessonDay(classRow.lesson_day), formatLessonTime(classRow.lesson_time)]
+                    {[formatLessonDay(classRow.lesson_day), formatLessonTime(classRow.lesson_time)]
                       .filter((item) => item && item !== "Not set")
                       .join(" / ") || "Schedule not set"}
                   </span>
@@ -213,7 +214,7 @@ function TeacherProfileContent() {
               ))}
             </div>
           ) : (
-            <EmptyState title="No assigned classes" description="No current class records are assigned to this teacher account." />
+            <EmptyState title="No assigned classes" description="No current student enrollments are assigned to this teacher." />
           )}
         </DataSurface>
 

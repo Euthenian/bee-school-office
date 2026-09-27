@@ -11,6 +11,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { lessonTypes } from "@/lib/class-details";
 import { createInitialContactRows } from "@/lib/contacts";
 import {
+  createTrialPackage,
   createTrialLesson,
   fetchAcquisitionSources,
   fetchClassLevels,
@@ -24,6 +25,7 @@ import { createInitialParticipant, trialLessonStatuses } from "@/lib/trial-lesso
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 const initialForm = {
+  trialOfferType: "single",
   contactJapaneseName: "",
   contactFurigana: "",
   contactAlphabetName: "",
@@ -31,6 +33,9 @@ const initialForm = {
   trialDate: "",
   trialTime: "",
   assignedTeacherProfileId: "",
+  assignedTeacherStaffId: "",
+  packageType: "group_english",
+  totalLessons: "4",
   lessonType: "group",
   levelId: "",
   status: "booked",
@@ -133,7 +138,9 @@ export default function NewTrialLessonPage() {
       }
 
       setLoadingTeachers(true);
-      const { data, error: teachersError } = await fetchSchoolTeachers(supabase, form.schoolId);
+      const { data, error: teachersError } = await fetchSchoolTeachers(supabase, form.schoolId, {
+        requireProfile: form.trialOfferType === "single"
+      });
       if (!active) return;
 
       if (teachersError) {
@@ -150,7 +157,7 @@ export default function NewTrialLessonPage() {
     return () => {
       active = false;
     };
-  }, [form.schoolId, mayManage, session]);
+  }, [form.schoolId, form.trialOfferType, mayManage, session]);
 
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
 
@@ -158,7 +165,9 @@ export default function NewTrialLessonPage() {
     setForm((current) => ({
       ...current,
       [field]: value,
-      ...(field === "schoolId" ? { assignedTeacherProfileId: "" } : {})
+      ...(field === "schoolId" || field === "trialOfferType"
+        ? { assignedTeacherProfileId: "", assignedTeacherStaffId: "" }
+        : {})
     }));
   }
 
@@ -188,28 +197,38 @@ export default function NewTrialLessonPage() {
       return;
     }
 
-    for (const participant of participants) {
-      if (!participant.japaneseName.trim()) {
-        setError("Each participant must have a Japanese name.");
-        setSubmitting(false);
-        return;
-      }
-
-      if (!participant.dateOfBirth && participant.ageOverride !== "") {
-        const age = Number(participant.ageOverride);
-        if (!Number.isInteger(age) || age < 0 || age > 120) {
-          setError("Participant age must be a whole number between 0 and 120.");
+    if (form.trialOfferType === "single") {
+      for (const participant of participants) {
+        if (!participant.japaneseName.trim()) {
+          setError("Each participant must have a Japanese name.");
           setSubmitting(false);
           return;
+        }
+
+        if (!participant.dateOfBirth && participant.ageOverride !== "") {
+          const age = Number(participant.ageOverride);
+          if (!Number.isInteger(age) || age < 0 || age > 120) {
+            setError("Participant age must be a whole number between 0 and 120.");
+            setSubmitting(false);
+            return;
+          }
         }
       }
     }
 
-    const { data: trialLessonId, error: createError } = await createTrialLesson(supabase, {
-      ...form,
-      contacts,
-      participants
-    });
+    const createResult =
+      form.trialOfferType === "package"
+        ? await createTrialPackage(supabase, {
+            ...form,
+            contacts
+          })
+        : await createTrialLesson(supabase, {
+            ...form,
+            contacts,
+            participants
+          });
+
+    const { data: createdId, error: createError } = createResult;
 
     if (createError) {
       setError(createError.message);
@@ -217,7 +236,7 @@ export default function NewTrialLessonPage() {
       return;
     }
 
-    router.push(`/trial-lessons/?created=${trialLessonId}`);
+    router.push(`/trial-lessons/?${form.trialOfferType === "package" ? "packageCreated" : "created"}=${createdId}`);
   }
 
   if (!mayManage) {
@@ -291,6 +310,13 @@ export default function NewTrialLessonPage() {
           </SurfaceHeader>
           <div className="form-grid">
             <label>
+              Trial offer
+              <select onChange={(event) => updateField("trialOfferType", event.target.value)} value={form.trialOfferType}>
+                <option value="single">Single trial lesson</option>
+                <option value="package">4-lesson group trial package</option>
+              </select>
+            </label>
+            <label>
               School
               <select
                 disabled={loadingFoundation}
@@ -310,12 +336,19 @@ export default function NewTrialLessonPage() {
               Assigned teacher
               <select
                 disabled={!form.schoolId || loadingTeachers}
-                onChange={(event) => updateField("assignedTeacherProfileId", event.target.value)}
-                value={form.assignedTeacherProfileId}
+                onChange={(event) =>
+                  form.trialOfferType === "package"
+                    ? updateField("assignedTeacherStaffId", event.target.value)
+                    : updateField("assignedTeacherProfileId", event.target.value)
+                }
+                value={form.trialOfferType === "package" ? form.assignedTeacherStaffId : form.assignedTeacherProfileId}
               >
                 <option value="">{loadingTeachers ? "Loading teachers..." : "No teacher assigned"}</option>
                 {teachers.map((teacher) => (
-                  <option key={teacher.profile_id} value={teacher.profile_id}>
+                  <option
+                    key={form.trialOfferType === "package" ? teacher.staff_id : teacher.profile_id}
+                    value={form.trialOfferType === "package" ? teacher.staff_id : teacher.profile_id}
+                  >
                     {teacher.full_name || teacher.email}
                   </option>
                 ))}
@@ -323,12 +356,43 @@ export default function NewTrialLessonPage() {
             </label>
             <label>
               Trial date
-              <input onChange={(event) => updateField("trialDate", event.target.value)} required type="date" value={form.trialDate} />
+              <input
+                onChange={(event) => updateField("trialDate", event.target.value)}
+                required={form.trialOfferType === "single"}
+                type="date"
+                value={form.trialDate}
+              />
             </label>
             <label>
               Trial time
-              <input onChange={(event) => updateField("trialTime", event.target.value)} required type="time" value={form.trialTime} />
+              <input
+                onChange={(event) => updateField("trialTime", event.target.value)}
+                required={form.trialOfferType === "single"}
+                type="time"
+                value={form.trialTime}
+              />
             </label>
+            {form.trialOfferType === "package" ? (
+              <>
+                <label>
+                  Package type
+                  <select onChange={(event) => updateField("packageType", event.target.value)} value={form.packageType}>
+                    <option value="group_english">Group English</option>
+                  </select>
+                </label>
+                <label>
+                  Total lessons
+                  <input
+                    max="24"
+                    min="1"
+                    onChange={(event) => updateField("totalLessons", event.target.value)}
+                    readOnly
+                    type="number"
+                    value={form.totalLessons}
+                  />
+                </label>
+              </>
+            ) : null}
             <label>
               Lesson type
               <select onChange={(event) => updateField("lessonType", event.target.value)} required value={form.lessonType}>
@@ -357,7 +421,12 @@ export default function NewTrialLessonPage() {
             </label>
             <label>
               Status
-              <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
+              <select
+                disabled={form.trialOfferType === "package"}
+                onChange={(event) => updateField("status", event.target.value)}
+                required
+                value={form.status}
+              >
                 {trialLessonStatuses.map((status) => (
                   <option key={status.value} value={status.value}>
                     {status.label}
@@ -398,6 +467,7 @@ export default function NewTrialLessonPage() {
           </div>
         </DataSurface>
 
+        {form.trialOfferType === "single" ? (
         <DataSurface>
           <SurfaceHeader
             actions={
@@ -422,6 +492,7 @@ export default function NewTrialLessonPage() {
             ))}
           </div>
         </DataSurface>
+        ) : null}
 
         <DataSurface>
           <SurfaceHeader>
@@ -452,7 +523,7 @@ export default function NewTrialLessonPage() {
             disabled={submitting || loadingFoundation || !activeSchools.length || !classLevels.length}
             type="submit"
           >
-            {submitting ? "Creating..." : "Create trial lesson"}
+            {submitting ? "Creating..." : form.trialOfferType === "package" ? "Create trial package" : "Create trial lesson"}
           </button>
         </div>
       </form>

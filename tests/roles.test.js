@@ -161,6 +161,10 @@ const classSafeDeleteSql = readFileSync(
   new URL("../supabase/migrations/20260920004000_safe_class_delete.sql", import.meta.url),
   "utf8"
 );
+const staffBasedTeacherAssignmentSql = readFileSync(
+  new URL("../supabase/migrations/20260920006000_staff_based_teacher_assignments.sql", import.meta.url),
+  "utf8"
+);
 const gmailTrialBookingCronHealthSql = readFileSync(
   new URL("../supabase/migrations/20260828001000_gmail_trial_booking_cron_health.sql", import.meta.url),
   "utf8"
@@ -367,7 +371,8 @@ test("student selects pin ambiguous PostgREST relationships", () => {
   assert.match(studentProfileSelect, /legacy_japanese_name/);
   assert.match(studentListSelect, /student_enrollments:student_enrollments!student_enrollments_student_id_organization_id_school_id_fkey/);
   assert.match(studentListSelect, /classes:classes!student_enrollments_class_id_organization_id_school_id_fkey/);
-  assert.match(studentProfileSelect, /assigned_teacher:profiles!classes_assigned_teacher_profile_id_fkey/);
+  assert.match(studentProfileSelect, /assigned_teacher_staff_id/);
+  assert.doesNotMatch(studentProfileSelect, /assigned_teacher_staff:staff/);
   assert.match(studentProfileSelect, /student_notes:student_notes!student_notes_student_id_organization_id_school_id_fkey/);
 });
 
@@ -405,13 +410,11 @@ test("class details use controlled shared values and compact formatting", () => 
   assert.equal(
     formatClassSummary({
       classes: {
-        lesson_type: "group",
         lesson_day: "monday",
-        lesson_time: "16:30:00",
-        class_levels: { label: "Elementary" }
+        lesson_time: "16:30:00"
       }
     }),
-    "Elementary / Group / Monday 16:30"
+    "Monday 16:30"
   );
 });
 
@@ -443,9 +446,9 @@ test("class management uses explicit classes and enrollment assignment", () => {
     }
   ];
 
-  assert.equal(formatClassOption(classRows[0]), "Monday 17:00 · Elementary · Group · Nao");
+  assert.equal(formatClassOption(classRows[0]), "Monday 17:00 - Ohashi");
   assert.equal(getClassActiveStudentCount(classRows[0]), 1);
-  assert.deepEqual(filterClasses(classRows, { search: "nao", schoolId: "all", lessonType: "all", status: "active" }).map((row) => row.id), [
+  assert.deepEqual(filterClasses(classRows, { search: "monday", schoolId: "all", status: "active" }).map((row) => row.id), [
     "class-1"
   ]);
   assert.equal(canManageClasses({ school_memberships: [{ role: "school_manager" }] }), true);
@@ -459,14 +462,14 @@ test("class management uses explicit classes and enrollment assignment", () => {
   assert.match(classesPage, /Students/);
   assert.match(classesPage, /deleteClass/);
   assert.match(classesPage, /ClassDeleteDialog/);
-  assert.match(classesPage, /<th>Actions<\/th>/);
+  assert.match(classesPage, /classes-actions-column/);
   assert.match(classNewPage, /createClass/);
   assert.match(classEditPage, /updateClass/);
   assert.match(classProfilePage, /student_enrollments/);
   assert.match(classProfilePage, /deleteClass/);
   assert.doesNotMatch(classesPage + classNewPage + classEditPage + classProfilePage, /student_finance|student_payments|student_charges|billing_plans/i);
   assert.match(studentEditPage, /StudentClassAssignment/);
-  assert.match(studentEditPage, /createNewClass: submitForm\.classAssignmentMode === "new"/);
+  assert.match(studentEditPage, /createNewClass: false/);
   assert.match(classManagementSql, /create or replace function public\.create_class_mvp/);
   assert.match(classManagementSql, /create or replace function public\.update_class_mvp/);
   assert.match(classManagementSql, /create or replace function public\.assign_student_to_class_mvp/);
@@ -508,9 +511,6 @@ test("staff teacher migration separates HR identity from authorization roles", (
   const staffTable = staffTeachersSql.match(/create table if not exists public\.staff \([\s\S]*?\n\);/)?.[0] || "";
   const assignmentTable =
     staffTeachersSql.match(/create table if not exists public\.staff_school_assignments \([\s\S]*?\n\);/)?.[0] || "";
-  const teacherOptions =
-    staffTeachersSql.match(/create or replace function public\.school_teacher_options[\s\S]*?revoke all on function public\.school_teacher_options/)?.[0] ||
-    "";
 
   assert.match(staffTable, /\bid uuid primary key/);
   assert.match(staffTable, /\borganization_id uuid not null/);
@@ -534,11 +534,15 @@ test("staff teacher migration separates HR identity from authorization roles", (
   assert.match(staffTeachersSql, /create unique index if not exists staff_organization_profile_id_uidx/);
   assert.match(staffTeachersSql, /create or replace function public\.can_manage_staff_org/);
   assert.match(staffTeachersSql, /create or replace function public\.has_active_staff_teacher_assignment/);
-  assert.match(teacherOptions, /from public\.staff_school_assignments ssa/);
-  assert.match(teacherOptions, /ssa\.can_teach = true/);
-  assert.match(teacherOptions, /join public\.school_memberships sm/);
-  assert.doesNotMatch(teacherOptions, /sm\.role = 'teacher'/);
+  assert.match(staffBasedTeacherAssignmentSql, /drop function if exists public\.school_teacher_options\(uuid\)/);
+  assert.match(staffBasedTeacherAssignmentSql, /returns table \([\s\S]*staff_id uuid[\s\S]*profile_id uuid/);
+  assert.match(staffBasedTeacherAssignmentSql, /from public\.staff_school_assignments ssa/);
+  assert.match(staffBasedTeacherAssignmentSql, /ssa\.can_teach = true/);
+  assert.doesNotMatch(staffBasedTeacherAssignmentSql, /join public\.school_memberships sm/);
+  assert.doesNotMatch(staffBasedTeacherAssignmentSql, /sm\.role = 'teacher'/);
   assert.match(staffTeachersSql, /public\.has_active_staff_teacher_assignment\(new\.school_id, new\.assigned_teacher_profile_id\)/);
+  assert.match(staffBasedTeacherAssignmentSql, /assigned_teacher_staff_id/);
+  assert.match(staffBasedTeacherAssignmentSql, /has_active_staff_teacher_staff_assignment/);
   assert.match(staffTeachersSql, /notify pgrst, 'reload schema'/);
 });
 
@@ -547,12 +551,12 @@ test("teachers section reuses staff eligibility without exposing payroll", () =>
   const teacherSource = readFileSync(new URL("../lib/teachers.js", import.meta.url), "utf8");
   const staffEditor = readFileSync(new URL("../components/StaffEditor.js", import.meta.url), "utf8");
   const eligibleBySchool = {
-    "school-1": [{ profile_id: "profile-teacher" }]
+    "school-1": [{ staff_id: "staff-1", profile_id: null }]
   };
   const eligibleKeys = buildEligibleTeacherKeySet(eligibleBySchool);
   const teachingSchoolManager = {
     id: "staff-1",
-    profile_id: "profile-teacher",
+    profile_id: null,
     legal_name: "Teaching Manager",
     status: "active",
     staff_school_assignments: [
@@ -1777,9 +1781,10 @@ test("student edit state preserves relational form values", () => {
       {
         id: "enrollment-1",
         status: "active",
+        assigned_teacher_staff_id: "staff-teacher-1",
+        assigned_teacher_profile_id: "teacher-1",
         classes: {
           id: "class-1",
-          assigned_teacher_profile_id: "teacher-1",
           lesson_type: "group",
           level_id: "elementary",
           lesson_day: "monday",
@@ -1792,7 +1797,7 @@ test("student edit state preserves relational form values", () => {
   assert.equal(editState.form.ageOverride, "8");
   assert.equal(editState.form.classAssignmentMode, "existing");
   assert.equal(editState.form.classId, "class-1");
-  assert.equal(editState.form.assignedTeacherProfileId, "teacher-1");
+  assert.equal(editState.form.assignedTeacherStaffId, "staff-teacher-1");
   assert.equal(editState.form.lessonTime, "16:30");
   assert.equal(editState.guardians[0].notes, "Pickup allowed");
   assert.equal(editState.notes[0].noteId, "note-1");

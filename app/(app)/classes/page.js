@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { formatClassLevel, formatLessonDay, formatLessonTime, formatLessonType, formatTeacherName, lessonTypes } from "@/lib/class-details";
+import { formatLessonDay, formatLessonTime } from "@/lib/class-details";
 import { classStatuses, filterClasses, formatClassName, getClassActiveStudentCount } from "@/lib/classes";
 import { deleteClass, fetchClasses, fetchSchools, updateClass } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
@@ -17,7 +17,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 export default function ClassesPage() {
   const { profile, session } = useAuth();
   const mayManage = canManageClasses(profile);
-  const [filters, setFilters] = useState({ lessonType: "all", schoolId: "all", search: "", status: "active" });
+  const [filters, setFilters] = useState({ schoolId: "all", search: "", status: "active" });
   const [state, setState] = useState({ classes: [], error: "", loading: true, schools: [] });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
@@ -156,7 +156,7 @@ export default function ClassesPage() {
           <span>Search classes</span>
           <input
             onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-            placeholder="Day, level, teacher, or school"
+            placeholder="Day, time, or school"
             type="search"
             value={filters.search}
           />
@@ -168,17 +168,6 @@ export default function ClassesPage() {
             {state.schools.map((school) => (
               <option key={school.id} value={school.id}>
                 {school.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Lesson type
-          <select onChange={(event) => setFilters((current) => ({ ...current, lessonType: event.target.value }))} value={filters.lessonType}>
-            <option value="all">All lesson types</option>
-            {lessonTypes.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
               </option>
             ))}
           </select>
@@ -221,11 +210,8 @@ export default function ClassesPage() {
                 <tr>
                   <th>Class</th>
                   <th>School</th>
-                  <th>Lesson type</th>
-                  <th>Level</th>
                   <th>Day</th>
                   <th>Time</th>
-                  <th>Teacher</th>
                   <th>Status</th>
                   <th>Students</th>
                   <th className="classes-actions-column">Actions</th>
@@ -238,11 +224,8 @@ export default function ClassesPage() {
                       <Link href={`/classes/profile/?id=${classRow.id}`}>{formatClassName(classRow)}</Link>
                     </td>
                     <td>{classRow.schools?.name || "Not assigned"}</td>
-                    <td>{formatLessonType(classRow.lesson_type)}</td>
-                    <td>{formatClassLevel(classRow)}</td>
                     <td>{formatLessonDay(classRow.lesson_day)}</td>
                     <td>{formatLessonTime(classRow.lesson_time)}</td>
-                    <td>{formatTeacherName(classRow.assigned_teacher)}</td>
                     <td>
                       <StatusBadge value={classRow.status} />
                     </td>
@@ -276,12 +259,9 @@ export default function ClassesPage() {
 
 function buildInactiveClassInput(classRow) {
   return {
-    assignedTeacherProfileId: classRow.assigned_teacher_profile_id,
     classId: classRow.id,
-    classLevelId: classRow.level_id,
     lessonDay: classRow.lesson_day,
     lessonTime: classRow.lesson_time,
-    lessonType: classRow.lesson_type,
     schoolId: classRow.school_id,
     status: "inactive"
   };

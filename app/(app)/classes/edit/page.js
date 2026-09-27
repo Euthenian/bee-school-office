@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataSurface } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { buildClassMutation, formatClassName } from "@/lib/classes";
-import { fetchClassLevels, fetchClassProfile, fetchSchoolTeachers, fetchSchools, updateClass } from "@/lib/data";
+import { fetchClassProfile, fetchSchools, updateClass } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -29,10 +29,8 @@ function EditClassContent() {
   const mayManage = canManageClasses(profile);
   const [classRow, setClassRow] = useState(null);
   const [form, setForm] = useState(() => buildClassMutation());
-  const [foundation, setFoundation] = useState({ classLevels: [], schools: [] });
-  const [teachers, setTeachers] = useState([]);
+  const [foundation, setFoundation] = useState({ schools: [] });
   const [state, setState] = useState({ error: "", loading: true });
-  const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -46,14 +44,13 @@ function EditClassContent() {
       }
 
       setState((current) => ({ ...current, loading: true }));
-      const [classResult, schoolsResult, levelsResult] = await Promise.all([
+      const [classResult, schoolsResult] = await Promise.all([
         fetchClassProfile(supabase, classId),
-        fetchSchools(supabase),
-        fetchClassLevels(supabase)
+        fetchSchools(supabase)
       ]);
       if (!active) return;
 
-      const loadError = [classResult.error, schoolsResult.error, levelsResult.error]
+      const loadError = [classResult.error, schoolsResult.error]
         .filter(Boolean)
         .map((error) => error.message)
         .join(" ");
@@ -61,16 +58,13 @@ function EditClassContent() {
       setClassRow(classResult.data || null);
       setForm(
         buildClassMutation({
-          assignedTeacherProfileId: classResult.data?.assigned_teacher_profile_id,
-          classLevelId: classResult.data?.level_id,
           lessonDay: classResult.data?.lesson_day,
           lessonTime: String(classResult.data?.lesson_time || "").slice(0, 5),
-          lessonType: classResult.data?.lesson_type,
           schoolId: classResult.data?.school_id,
           status: classResult.data?.status
         })
       );
-      setFoundation({ classLevels: levelsResult.data || [], schools: schoolsResult.data || [] });
+      setFoundation({ schools: schoolsResult.data || [] });
       setState({ error: loadError, loading: false });
     }
 
@@ -81,51 +75,13 @@ function EditClassContent() {
     };
   }, [classId, mayManage, session]);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadTeachers() {
-      setTeachers([]);
-      if (!form.schoolId || !session || !mayManage) {
-        setLoadingTeachers(false);
-        return;
-      }
-
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        setLoadingTeachers(false);
-        return;
-      }
-
-      setLoadingTeachers(true);
-      const { data, error } = await fetchSchoolTeachers(supabase, form.schoolId);
-      if (!active) return;
-
-      if (error) {
-        setState((current) => ({ ...current, error: error.message }));
-      }
-      setTeachers(data || []);
-      setLoadingTeachers(false);
-    }
-
-    loadTeachers();
-
-    return () => {
-      active = false;
-    };
-  }, [form.schoolId, mayManage, session]);
-
   const availableSchools = useMemo(
     () => foundation.schools.filter((school) => school.status === "active" || school.id === form.schoolId),
     [form.schoolId, foundation.schools]
   );
 
   function updateField(field, value) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-      ...(field === "schoolId" ? { assignedTeacherProfileId: "" } : {})
-    }));
+    setForm((current) => ({ ...current, [field]: value }));
   }
 
   async function handleSubmit(event) {
@@ -202,14 +158,11 @@ function EditClassContent() {
       <DataSurface>
         <ClassEditor
           cancelHref={`/classes/profile/?id=${classId}`}
-          classLevels={foundation.classLevels}
           form={form}
-          loadingTeachers={loadingTeachers}
           onChange={updateField}
           onSubmit={handleSubmit}
           schools={availableSchools}
           submitting={submitting}
-          teachers={teachers}
         />
       </DataSurface>
     </>

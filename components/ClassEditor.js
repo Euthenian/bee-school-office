@@ -1,20 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { lessonDays, lessonTypes } from "@/lib/class-details";
+import { lessonDays } from "@/lib/class-details";
 import { classStatuses } from "@/lib/classes";
 
 export function ClassEditor({
   cancelHref,
-  classLevels = [],
   form,
-  loadingTeachers,
   onChange,
   onSubmit,
   schools = [],
   submitLabel = "Save class",
-  submitting,
-  teachers = []
+  submitting
 }) {
   return (
     <form className="student-form" onSubmit={onSubmit}>
@@ -26,27 +23,6 @@ export function ClassEditor({
             {schools.map((school) => (
               <option key={school.id} value={school.id}>
                 {school.name} - {school.organizations?.name || "Organization not shown"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Lesson type
-          <select onChange={(event) => onChange("lessonType", event.target.value)} required value={form.lessonType}>
-            {lessonTypes.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Level
-          <select onChange={(event) => onChange("classLevelId", event.target.value)} required value={form.classLevelId}>
-            <option value="">Select a level</option>
-            {classLevels.map((level) => (
-              <option key={level.id} value={level.id}>
-                {level.label}
               </option>
             ))}
           </select>
@@ -65,21 +41,6 @@ export function ClassEditor({
         <label>
           Lesson time
           <input onChange={(event) => onChange("lessonTime", event.target.value)} required type="time" value={form.lessonTime} />
-        </label>
-        <label>
-          Assigned teacher
-          <select
-            disabled={!form.schoolId || loadingTeachers}
-            onChange={(event) => onChange("assignedTeacherProfileId", event.target.value)}
-            value={form.assignedTeacherProfileId}
-          >
-            <option value="">{loadingTeachers ? "Loading teachers..." : "No teacher assigned"}</option>
-            {teachers.map((teacher) => (
-              <option key={teacher.profile_id} value={teacher.profile_id}>
-                {teacher.full_name || teacher.email}
-              </option>
-            ))}
-          </select>
         </label>
         <label>
           Status

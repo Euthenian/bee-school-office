@@ -9,6 +9,7 @@ import {
   formatUpcomingTrialLessonDate,
   getMissingTrialLessonConversionFields,
   getNearestUpcomingTrialLesson,
+  getTrialLessonPersonSearchValue,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
   resetTrialLessonTableFilters
@@ -171,6 +172,33 @@ test("trial lesson name sorting and contains filter use displayed prospect and p
 
   assert.deepEqual(filteredIds(rows, {}, { column: "name", direction: "asc" }), ["alpha", "bravo"]);
   assert.deepEqual(filteredIds(rows, { nameSearch: "needle" }, { column: "name", direction: "asc" }), ["alpha"]);
+});
+
+test("created trial lesson links initialize the editable search from the created prospect", () => {
+  assert.equal(
+    getTrialLessonPersonSearchValue(
+      trialLesson("created", {
+        prospects: { japanese_name: "柴田愛心", alphabet_name: "Aiko Shibata", inquiry_methods: null, acquisition_sources: null }
+      })
+    ),
+    "柴田愛心"
+  );
+  assert.equal(
+    getTrialLessonPersonSearchValue(
+      trialLesson("participant-fallback", {
+        prospects: { japanese_name: "", alphabet_name: "", inquiry_methods: null, acquisition_sources: null },
+        trial_lesson_participants: [{ id: "participant-1", japanese_name: "Participant Name", alphabet_name: "" }]
+      })
+    ),
+    "Participant Name"
+  );
+  assert.match(trialLessonsPage, /const searchParams = useSearchParams\(\)/);
+  assert.match(trialLessonsPage, /const createdTrialLessonId = searchParams\.get\("created"\) \|\| ""/);
+  assert.match(trialLessonsPage, /fetchTrialLessons\(supabase, \{ trialLessonId: createdTrialLessonId \}\)/);
+  assert.match(trialLessonsPage, /const createdSearchValue = getTrialLessonPersonSearchValue\(data\?\.\[0\]\)/);
+  assert.match(trialLessonsPage, /setSearch\(createdSearchValue\)/);
+  assert.match(trialLessonsPage, /onChange=\{\(event\) => setSearch\(event\.target\.value\)\}/);
+  assert.match(dataSource, /if \(filters\.trialLessonId\) \{\s+query = query\.eq\("id", filters\.trialLessonId\);/);
 });
 
 test("trial lesson status and teacher column filters combine", () => {

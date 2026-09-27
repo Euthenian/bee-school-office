@@ -9,6 +9,7 @@ import { useAuth } from "@/components/AuthProvider";
 import {
   createBillingPlan,
   fetchBillingPlans,
+  fetchClassLevels,
   fetchOrganizations,
   fetchSchools,
   setBillingPlanActive,
@@ -23,7 +24,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 export default function BillingPlansSettingsPage() {
   const { loading: authLoading, profile, session } = useAuth();
   const mayManage = canEditStudentFinance(profile);
-  const [foundation, setFoundation] = useState({ loading: true, organizations: [], schools: [] });
+  const [foundation, setFoundation] = useState({ classLevels: [], loading: true, organizations: [], schools: [] });
   const [state, setState] = useState({ error: "", loading: true, plans: [], saving: false, success: "" });
   const [filters, setFilters] = useState({ organizationId: "" });
   const [editingId, setEditingId] = useState("");
@@ -42,18 +43,22 @@ export default function BillingPlansSettingsPage() {
         return;
       }
 
-      const [organizationsResult, schoolsResult] = await Promise.all([fetchOrganizations(supabase), fetchSchools(supabase)]);
+      const [organizationsResult, schoolsResult, levelsResult] = await Promise.all([
+        fetchOrganizations(supabase),
+        fetchSchools(supabase),
+        fetchClassLevels(supabase)
+      ]);
       if (!active) return;
 
       const organizations = organizationsResult.data || [];
       const schools = schoolsResult.data || [];
       const organizationId = filters.organizationId || organizations[0]?.id || "";
 
-      setFoundation({ loading: false, organizations, schools });
+      setFoundation({ classLevels: levelsResult.data || [], loading: false, organizations, schools });
       setFilters((current) => ({ ...current, organizationId }));
       setForm((current) => ({ ...current, organizationId: current.organizationId || organizationId }));
 
-      const error = [organizationsResult.error, schoolsResult.error]
+      const error = [organizationsResult.error, schoolsResult.error, levelsResult.error]
         .filter(Boolean)
         .map((item) => item.message)
         .join(" ");
@@ -219,6 +224,17 @@ export default function BillingPlansSettingsPage() {
               <input onChange={(event) => updateField("name", event.target.value)} value={form.name} />
             </label>
             <label>
+              Course
+              <select onChange={(event) => updateField("classLevelId", event.target.value)} value={form.classLevelId}>
+                <option value="">Not set</option>
+                {foundation.classLevels.map((level) => (
+                  <option key={level.id} value={level.id}>
+                    {level.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Lesson type
               <select onChange={(event) => updateField("lessonType", event.target.value)} value={form.lessonType}>
                 <option value="">Not set</option>
@@ -329,6 +345,7 @@ export default function BillingPlansSettingsPage() {
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Course</th>
                   <th>Lesson type</th>
                   <th>Duration</th>
                   <th>Lessons/month</th>
@@ -343,6 +360,7 @@ export default function BillingPlansSettingsPage() {
                 {state.plans.map((plan) => (
                   <tr key={plan.id}>
                     <td>{plan.name}</td>
+                    <td>{plan.class_levels?.label || "Not set"}</td>
                     <td>{formatLessonType(plan.lesson_type)}</td>
                     <td>{plan.lesson_duration_minutes ? `${plan.lesson_duration_minutes} min` : "Not set"}</td>
                     <td>{plan.lessons_per_month ? `${plan.lessons_per_month}/month` : "Not set"}</td>

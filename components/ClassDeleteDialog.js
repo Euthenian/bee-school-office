@@ -1,6 +1,6 @@
 "use client";
 
-import { formatClassLevel, formatLessonDay, formatLessonTime, formatLessonType, formatTeacherName } from "@/lib/class-details";
+import { formatLessonDay, formatLessonTime } from "@/lib/class-details";
 import { getClassEnrollmentCount } from "@/lib/classes";
 
 export function ClassDeleteDialog({ classRow, deactivating = false, deleting, error, onCancel, onConfirm, onDeactivate }) {
@@ -25,8 +25,8 @@ export function ClassDeleteDialog({ classRow, deactivating = false, deleting, er
         </header>
         <div className="confirmation-modal-body">
           <div id="delete-class-description" className="table-cell-stack">
-            <strong>{[formatLessonDay(classRow.lesson_day), formatLessonTime(classRow.lesson_time), formatClassLevel(classRow), formatLessonType(classRow.lesson_type)].filter(Boolean).join(" - ")}</strong>
-            <span>Teacher: {formatTeacherName(classRow.assigned_teacher)}</span>
+            <strong>{[formatLessonDay(classRow.lesson_day), formatLessonTime(classRow.lesson_time)].filter(Boolean).join(" - ")}</strong>
+            <span>{classRow.schools?.name || "School not set"}</span>
             <span>Enrolled student history: {enrollmentHistoryCount}</span>
           </div>
           {hasEnrollmentHistory ? (

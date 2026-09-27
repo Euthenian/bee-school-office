@@ -251,6 +251,14 @@ function PendingTrialBookingReviewContent() {
     setConverting(false);
   }
 
+  function handleConvertSubmit(event) {
+    event.preventDefault();
+    if (!canAttemptConversion || converting) {
+      return;
+    }
+    handleConvert();
+  }
+
   if (!mayManage) {
     return (
       <>
@@ -321,7 +329,7 @@ function PendingTrialBookingReviewContent() {
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
       {state.success ? <p className="inline-success">{state.success}</p> : null}
 
-      <form className="student-form" onSubmit={handleSubmit}>
+      <form className="student-form" id="pending-trial-booking-review-form" onSubmit={handleSubmit}>
         <DataSurface>
           <SurfaceHeader>
             <h2>Parsed Booking Details</h2>
@@ -437,7 +445,9 @@ function PendingTrialBookingReviewContent() {
             </label>
           </div>
         </DataSurface>
+      </form>
 
+      <form className="student-form" onSubmit={handleConvertSubmit}>
         <ConversionPanel
           alreadyConverted={alreadyConverted}
           canAttemptConversion={canAttemptConversion}
@@ -445,45 +455,44 @@ function PendingTrialBookingReviewContent() {
           conversionForm={conversionForm}
           conversionResult={conversionResult}
           converting={converting}
-          onConvert={handleConvert}
           onUpdate={updateConversionField}
           onUsePreference={applyPreferredSchedule}
           pendingImport={pendingImport}
           prospectCandidates={prospectCandidates}
         />
-
-        <DataSurface>
-          <SurfaceHeader>
-            <h2>Source Information</h2>
-          </SurfaceHeader>
-          <dl className="detail-list">
-            <SourceRow label="Subject" value={pendingImport.subject} />
-            <SourceRow label="Booking source" value={pendingImport.booking_source} />
-            <SourceRow label="Trial type" value={pendingImport.trial_type} />
-            <SourceRow label="Source mailbox" value={pendingImport.source_mailbox} />
-            <SourceRow label="Received" value={formatDateTime(pendingImport.received_at)} />
-            <SourceRow label="Sender" value={pendingImport.sender} />
-            <SourceRow label="Gmail message ID" value={pendingImport.gmail_message_id} />
-            <SourceRow label="Parse status" value={<StatusBadge value={pendingImport.parse_status} />} />
-            <SourceRow label="Parse error" value={pendingImport.parse_error} />
-            <SourceRow label="Converted at" value={formatDateTime(pendingImport.converted_at)} />
-            <SourceRow label="Converted Trial Lesson" value={pendingImport.converted_trial_lesson_id} />
-          </dl>
-          <details className="source-details">
-            <summary>Raw source body</summary>
-            <pre>{pendingImport.raw_body || "No raw body stored."}</pre>
-          </details>
-        </DataSurface>
-
-        <div className="form-actions">
-          <Link className="secondary-button" href="/trial-lessons/imports/">
-            Cancel
-          </Link>
-          <button className="primary-button" disabled={saving || alreadyConverted} type="submit">
-            {saving ? "Saving..." : "Save corrections"}
-          </button>
-        </div>
       </form>
+
+      <DataSurface>
+        <SurfaceHeader>
+          <h2>Source Information</h2>
+        </SurfaceHeader>
+        <dl className="detail-list">
+          <SourceRow label="Subject" value={pendingImport.subject} />
+          <SourceRow label="Booking source" value={pendingImport.booking_source} />
+          <SourceRow label="Trial type" value={pendingImport.trial_type} />
+          <SourceRow label="Source mailbox" value={pendingImport.source_mailbox} />
+          <SourceRow label="Received" value={formatDateTime(pendingImport.received_at)} />
+          <SourceRow label="Sender" value={pendingImport.sender} />
+          <SourceRow label="Gmail message ID" value={pendingImport.gmail_message_id} />
+          <SourceRow label="Parse status" value={<StatusBadge value={pendingImport.parse_status} />} />
+          <SourceRow label="Parse error" value={pendingImport.parse_error} />
+          <SourceRow label="Converted at" value={formatDateTime(pendingImport.converted_at)} />
+          <SourceRow label="Converted Trial Lesson" value={pendingImport.converted_trial_lesson_id} />
+        </dl>
+        <details className="source-details">
+          <summary>Raw source body</summary>
+          <pre>{pendingImport.raw_body || "No raw body stored."}</pre>
+        </details>
+      </DataSurface>
+
+      <div className="form-actions">
+        <Link className="secondary-button" href="/trial-lessons/imports/">
+          Cancel
+        </Link>
+        <button className="primary-button" disabled={saving || alreadyConverted} form="pending-trial-booking-review-form" type="submit">
+          {saving ? "Saving..." : "Save corrections"}
+        </button>
+      </div>
     </>
   );
 }
@@ -495,7 +504,6 @@ function ConversionPanel({
   conversionForm,
   conversionResult,
   converting,
-  onConvert,
   onUpdate,
   onUsePreference,
   pendingImport,
@@ -615,7 +623,7 @@ function ConversionPanel({
           ) : null}
 
           <div className="form-actions conversion-actions">
-            <button className="convert-button" disabled={!canAttemptConversion || converting} onClick={onConvert} type="button">
+            <button className="convert-button" disabled={!canAttemptConversion || converting} type="submit">
               {converting ? "Creating..." : "Create Trial Lesson"}
             </button>
           </div>

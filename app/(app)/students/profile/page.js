@@ -30,10 +30,8 @@ import {
   getPrimaryBillingSummary
 } from "@/lib/billing";
 import {
-  formatClassLevel,
   formatLessonDay,
   formatLessonTime,
-  formatLessonType,
   formatTeacherName,
   getActiveEnrollment
 } from "@/lib/class-details";
@@ -48,6 +46,7 @@ import {
   fetchStudentBilling,
   fetchStudentCommunications,
   fetchStudentFinance,
+  fetchSchoolTeachers,
   fetchStudentProfile,
   fetchStudentQuestions,
   markStudentQuestionDone,
@@ -121,6 +120,7 @@ function StudentProfileContent() {
     communications: [],
     questionError: "",
     questions: [],
+    teacherOptions: [],
     loading: true,
     error: "",
     student: null
@@ -141,6 +141,7 @@ function StudentProfileContent() {
           communications: [],
           questionError: "",
           questions: [],
+          teacherOptions: [],
           loading: false,
           error: "",
           student: null
@@ -163,6 +164,11 @@ function StudentProfileContent() {
       ]);
       if (!active) return;
 
+      const teacherOptionsResult = data?.school_id
+        ? await fetchSchoolTeachers(supabase, data.school_id)
+        : { data: [], error: null };
+      if (!active) return;
+
       setState({
         billing: billingResult.data || { charges: [], payments: [], refunds: [], summary: [] },
         billingError: billingResult.error ? billingResult.error.message : "",
@@ -170,8 +176,9 @@ function StudentProfileContent() {
         financeError: financeResult.error ? financeResult.error.message : "",
         communicationError: communicationsResult.error ? communicationsResult.error.message : "",
         communications: communicationsResult.data || [],
-        questionError: questionsResult.error ? questionsResult.error.message : "",
+        questionError: [questionsResult.error?.message, teacherOptionsResult.error?.message].filter(Boolean).join(" "),
         questions: sortOpenStudentQuestions(questionsResult.data || []),
+        teacherOptions: teacherOptionsResult.data || [],
         loading: false,
         error: error ? error.message : "",
         student: data || null
@@ -449,6 +456,7 @@ function StudentProfileContent() {
   const contactGroups = groupStudentContacts(student.student_contacts);
   const hasContacts = contactGroups.emails.length || contactGroups.phones.length;
   const activeEnrollment = getActiveEnrollment(student.student_enrollments);
+  const assignedTeacher = getAssignedTeacherForEnrollment(activeEnrollment, state.teacherOptions);
   const classDetails = activeEnrollment?.classes;
   const mayEdit = canCreateStudents(profile);
   const mayManageStudentBilling = canManageBilling(profile);
@@ -574,15 +582,7 @@ function StudentProfileContent() {
           <dl className="detail-list">
             <div>
               <dt>Assigned teacher</dt>
-              <dd>{formatTeacherName(classDetails?.assigned_teacher)}</dd>
-            </div>
-            <div>
-              <dt>Lesson type</dt>
-              <dd>{formatLessonType(classDetails?.lesson_type)}</dd>
-            </div>
-            <div>
-              <dt>Level</dt>
-              <dd>{formatClassLevel(classDetails, activeEnrollment)}</dd>
+              <dd>{formatTeacherName(assignedTeacher)}</dd>
             </div>
             <div>
               <dt>Current age</dt>
@@ -1239,6 +1239,18 @@ function ContactList({ contacts, title }) {
       </ul>
     </section>
   );
+}
+
+function getAssignedTeacherForEnrollment(enrollment, teacherOptions = []) {
+  if (!enrollment) return null;
+
+  const byStaffId = teacherOptions.find((teacher) => teacher.staff_id === enrollment.assigned_teacher_staff_id);
+  if (byStaffId) return byStaffId;
+
+  const byProfileId = teacherOptions.find((teacher) => teacher.profile_id === enrollment.assigned_teacher_profile_id);
+  if (byProfileId) return byProfileId;
+
+  return enrollment.assigned_teacher || null;
 }
 
 function ProfileLoading() {

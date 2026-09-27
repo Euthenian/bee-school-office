@@ -29,7 +29,7 @@ const initialForm = {
   monthlyFeeYen: "",
   classAssignmentMode: "existing",
   classId: "",
-  assignedTeacherProfileId: "",
+  assignedTeacherStaffId: "",
   lessonType: "group",
   classLevelId: "",
   lessonDay: "",
@@ -192,7 +192,7 @@ export default function NewStudentPage() {
       ...current,
       [field]: value,
       ...(field === "schoolId"
-        ? { assignedTeacherProfileId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
+        ? { assignedTeacherStaffId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
         : {}),
       ...(field === "classAssignmentMode" ? { classId: value === "new" ? "" : current.classId } : {})
     }));
@@ -227,21 +227,16 @@ export default function NewStudentPage() {
       }
     }
 
-    if (form.classAssignmentMode === "existing" && !form.classId) {
-      setError("Select an existing class or choose Create new class.");
+    if (!form.classId) {
+      setError("Select a class time.");
       setSubmitting(false);
       return;
     }
 
     const selectedBillingPlan = billingPlanOptions.find((plan) => plan.id === form.billingPlanId);
-    const selectedClass = classes.find((classRow) => classRow.id === form.classId);
-    const submitForm = selectedBillingPlan?.lesson_type ? { ...form, lessonType: selectedBillingPlan.lesson_type } : form;
-    const compatibilityError = getPackageClassCompatibilityError(submitForm, selectedBillingPlan, selectedClass);
-    if (compatibilityError) {
-      setError(compatibilityError);
-      setSubmitting(false);
-      return;
-    }
+    const submitForm = selectedBillingPlan
+      ? { ...form, classLevelId: selectedBillingPlan.class_level_id || "", lessonType: selectedBillingPlan.lesson_type || form.lessonType }
+      : form;
 
     if (form.monthlyFeeYen !== "" && !/^\d+$/.test(String(form.monthlyFeeYen))) {
       setError("Monthly fee must be a whole yen amount.");
@@ -259,7 +254,7 @@ export default function NewStudentPage() {
     const { data: studentId, error: createError } = await createStudent(supabase, {
       ...submitForm,
       contacts,
-      createNewClass: submitForm.classAssignmentMode === "new"
+      createNewClass: false
     });
 
     if (createError) {
@@ -474,8 +469,7 @@ export default function NewStudentPage() {
               loadingBillingPlans ||
               loadingClasses ||
               loadingClassLevels ||
-              !activeSchools.length ||
-              (form.classAssignmentMode === "new" && !classLevels.length)
+              !activeSchools.length
             }
             type="submit"
           >
@@ -495,15 +489,4 @@ function getBillingPlanOptionsForSchool(plans = [], school = null, currentPlanId
     const scopedToSchool = !plan.school_id || plan.school_id === school.id;
     return sameOrganization && scopedToSchool && (plan.active || plan.id === currentPlanId);
   });
-}
-
-function getPackageClassCompatibilityError(form, selectedBillingPlan, selectedClass) {
-  if (!selectedBillingPlan?.lesson_type) return "";
-
-  const classLessonType = form.classAssignmentMode === "new" ? form.lessonType : selectedClass?.lesson_type;
-  if (classLessonType && classLessonType !== selectedBillingPlan.lesson_type) {
-    return "Choose a class with the same lesson type as the selected Lesson package, or choose Custom fee.";
-  }
-
-  return "";
 }

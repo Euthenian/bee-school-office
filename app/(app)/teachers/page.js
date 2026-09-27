@@ -50,10 +50,10 @@ export default function TeachersPage() {
 
       const schools = schoolsResult.data || [];
       const staff = staffResult.data || [];
-      const profileIds = staff.map((staffMember) => staffMember.profile_id).filter(Boolean);
+      const staffIds = staff.map((staffMember) => staffMember.id).filter(Boolean);
       const [eligibleResult, classCountsResult] = await Promise.all([
         fetchEligibleTeachersBySchools(supabase, schools.map((school) => school.id)),
-        fetchTeacherClassCounts(supabase, profileIds)
+        fetchTeacherClassCounts(supabase, staffIds)
       ]);
       if (!active) return;
 

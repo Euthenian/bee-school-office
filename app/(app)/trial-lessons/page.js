@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CommunicationComposer } from "@/components/CommunicationComposer";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
@@ -28,8 +28,11 @@ import {
   fetchPendingTrialBookingImportCount,
   fetchSchoolTeachers,
   fetchSchools,
+  fetchTrialPackages,
   fetchTrialLessons,
   markTrialLessonPhoneFollowUpComplete,
+  updateTrialPackageLesson,
+  updateTrialPackageStatus,
   updateTrialLessonConversionDetails
 } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -47,6 +50,7 @@ import {
   getLocalDateKey,
   getMissingTrialLessonConversionFields,
   getPrimaryParticipant,
+  getTrialLessonPersonSearchValue,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
   removeTrialLessonById,
@@ -54,13 +58,26 @@ import {
   trialLessonDateFilterPresets,
   trialLessonStatuses
 } from "@/lib/trial-lessons";
+import {
+  formatTrialPackageLessonStatus,
+  formatTrialPackageLessonTeacher,
+  formatTrialPackageSummary,
+  formatTrialPackageType,
+  getTrialPackageProgress,
+  sortTrialPackageLessons,
+  trialPackageLessonStatuses,
+  trialPackageStatuses
+} from "@/lib/trial-packages";
 import { canManageTrialLessons } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function TrialLessonsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { profile, session } = useAuth();
+  const createdTrialLessonId = searchParams.get("created") || "";
   const [search, setSearch] = useState("");
+  const initializedCreatedSearchIdRef = useRef("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [schoolFilter, setSchoolFilter] = useState("");
   const [teacherFilter, setTeacherFilter] = useState("");
@@ -68,6 +85,8 @@ export default function TrialLessonsPage() {
   const [classLevels, setClassLevels] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [state, setState] = useState({ loading: true, error: "", trialLessons: [] });
+  const [packageState, setPackageState] = useState({ loading: true, error: "", trialPackages: [] });
+  const [packageTeacherOptionsBySchool, setPackageTeacherOptionsBySchool] = useState({});
   const [pendingState, setPendingState] = useState({ loading: true, count: 0 });
   const [actionNotice, setActionNotice] = useState("");
   const [communicatingTrialLesson, setCommunicatingTrialLesson] = useState(null);
@@ -81,11 +100,46 @@ export default function TrialLessonsPage() {
   const [isDeletingBulk, setIsDeletingBulk] = useState(false);
   const [deletingIds, setDeletingIds] = useState([]);
   const [phoneFollowUpId, setPhoneFollowUpId] = useState("");
+  const [packageActionId, setPackageActionId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [packageRefreshKey, setPackageRefreshKey] = useState(0);
   const [columnFilters, setColumnFilters] = useState(defaultTrialLessonColumnFilters);
   const [tableSort, setTableSort] = useState(defaultTrialLessonSort);
   const [selectedTrialLessonIds, setSelectedTrialLessonIds] = useState(() => new Set());
   const mayManage = canManageTrialLessons(profile);
+
+  useEffect(() => {
+    if (!createdTrialLessonId || initializedCreatedSearchIdRef.current === createdTrialLessonId) return;
+
+    if (search.trim()) {
+      initializedCreatedSearchIdRef.current = createdTrialLessonId;
+      return;
+    }
+
+    let active = true;
+
+    async function initializeCreatedTrialLessonSearch() {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase || !session) return;
+
+      const { data, error } = await fetchTrialLessons(supabase, { trialLessonId: createdTrialLessonId });
+      if (!active) return;
+
+      if (!error) {
+        const createdSearchValue = getTrialLessonPersonSearchValue(data?.[0]);
+        if (createdSearchValue) {
+          setSearch(createdSearchValue);
+        }
+      }
+      initializedCreatedSearchIdRef.current = createdTrialLessonId;
+    }
+
+    initializeCreatedTrialLessonSearch();
+
+    return () => {
+      active = false;
+    };
+  }, [createdTrialLessonId, search, session]);
 
   useEffect(() => {
     let active = true;
@@ -125,7 +179,7 @@ export default function TrialLessonsPage() {
       const supabase = getSupabaseBrowserClient();
       if (!supabase) return;
 
-      const { data } = await fetchSchoolTeachers(supabase, schoolFilter);
+      const { data } = await fetchSchoolTeachers(supabase, schoolFilter, { requireProfile: true });
       if (active) {
         setTeachers(data || []);
       }
@@ -140,6 +194,37 @@ export default function TrialLessonsPage() {
 
   useEffect(() => {
     let active = true;
+
+    async function loadPackageTeachers() {
+      if (!session || !mayManage || !packageState.trialPackages.length) {
+        setPackageTeacherOptionsBySchool({});
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+
+      const schoolIds = [...new Set(packageState.trialPackages.map((trialPackage) => trialPackage.school_id).filter(Boolean))];
+      const entries = await Promise.all(
+        schoolIds.map(async (schoolId) => {
+          const { data } = await fetchSchoolTeachers(supabase, schoolId);
+          return [schoolId, data || []];
+        })
+      );
+      if (!active) return;
+
+      setPackageTeacherOptionsBySchool(Object.fromEntries(entries));
+    }
+
+    loadPackageTeachers();
+
+    return () => {
+      active = false;
+    };
+  }, [mayManage, packageState.trialPackages, session]);
+
+  useEffect(() => {
+    let active = true;
     const timer = window.setTimeout(async () => {
       const supabase = getSupabaseBrowserClient();
       if (!supabase || !session) {
@@ -149,6 +234,7 @@ export default function TrialLessonsPage() {
       }
 
       setState((current) => ({ ...current, loading: true }));
+      setPackageState((current) => ({ ...current, loading: true }));
       setPendingState((current) => ({ ...current, loading: true }));
       const filters = {
         search,
@@ -157,8 +243,13 @@ export default function TrialLessonsPage() {
         scope: ["upcoming", "needs_follow_up"].includes(statusFilter) ? statusFilter : "",
         status: statusFilter !== "all" && !["upcoming", "needs_follow_up"].includes(statusFilter) ? statusFilter : ""
       };
-      const [trialLessonsResult, pendingBookingsResult] = await Promise.all([
+      const packageFilters = {
+        search,
+        schoolId: schoolFilter
+      };
+      const [trialLessonsResult, trialPackagesResult, pendingBookingsResult] = await Promise.all([
         fetchTrialLessons(supabase, filters),
+        fetchTrialPackages(supabase, packageFilters),
         mayManage ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "needs_action" }) : { count: 0, error: null }
       ]);
       if (!active) return;
@@ -171,6 +262,11 @@ export default function TrialLessonsPage() {
           .join(" "),
         trialLessons: trialLessonsResult.data || []
       });
+      setPackageState({
+        loading: false,
+        error: trialPackagesResult.error?.message || "",
+        trialPackages: trialPackagesResult.data || []
+      });
       setPendingState({
         loading: false,
         count: pendingBookingsResult.count || 0
@@ -181,7 +277,7 @@ export default function TrialLessonsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [mayManage, refreshKey, search, schoolFilter, session, statusFilter, teacherFilter]);
+  }, [mayManage, packageRefreshKey, refreshKey, search, schoolFilter, session, statusFilter, teacherFilter]);
 
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
   const todayKey = useMemo(() => getLocalDateKey(), []);
@@ -542,6 +638,66 @@ export default function TrialLessonsPage() {
     setRefreshKey((current) => current + 1);
   }
 
+  async function handlePackageLessonSave(lesson, draft) {
+    setPackageActionId(lesson.id);
+    setActionNotice("");
+    setPackageState((current) => ({ ...current, error: "" }));
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setPackageState((current) => ({ ...current, error: "You must be signed in before updating a trial package lesson." }));
+      setPackageActionId("");
+      return;
+    }
+
+    const { error } = await updateTrialPackageLesson(supabase, {
+      trialPackageLessonId: lesson.id,
+      lessonDate: draft.lessonDate,
+      lessonTime: draft.lessonTime,
+      assignedTeacherStaffId: draft.assignedTeacherStaffId,
+      status: draft.status,
+      notes: draft.notes
+    });
+
+    if (error) {
+      setPackageState((current) => ({ ...current, error: error.message }));
+      setPackageActionId("");
+      return;
+    }
+
+    setActionNotice("Trial package lesson updated.");
+    setPackageActionId("");
+    setPackageRefreshKey((current) => current + 1);
+  }
+
+  async function handlePackageStatusChange(trialPackage, status) {
+    setPackageActionId(trialPackage.id);
+    setActionNotice("");
+    setPackageState((current) => ({ ...current, error: "" }));
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setPackageState((current) => ({ ...current, error: "You must be signed in before updating a trial package." }));
+      setPackageActionId("");
+      return;
+    }
+
+    const { error } = await updateTrialPackageStatus(supabase, {
+      trialPackageId: trialPackage.id,
+      status
+    });
+
+    if (error) {
+      setPackageState((current) => ({ ...current, error: error.message }));
+      setPackageActionId("");
+      return;
+    }
+
+    setActionNotice("Trial package status updated.");
+    setPackageActionId("");
+    setPackageRefreshKey((current) => current + 1);
+  }
+
   return (
     <>
       <PageHeader
@@ -639,7 +795,11 @@ export default function TrialLessonsPage() {
         </div>
       </div>
 
-      {state.error ? <p className="inline-alert">{state.error}</p> : null}
+      {[state.error, packageState.error].filter(Boolean).map((message) => (
+        <p className="inline-alert" key={message}>
+          {message}
+        </p>
+      ))}
       {actionNotice ? <p className="inline-success">{actionNotice}</p> : null}
 
       {selectedTrialLessonCount > 0 && mayManage ? (
@@ -714,6 +874,16 @@ export default function TrialLessonsPage() {
           onUpdate={updateConversionCompletionField}
         />
       ) : null}
+
+      <TrialPackageTracker
+        actionId={packageActionId}
+        loading={packageState.loading}
+        mayManage={mayManage}
+        onLessonSave={handlePackageLessonSave}
+        onStatusChange={handlePackageStatusChange}
+        teacherOptionsBySchool={packageTeacherOptionsBySchool}
+        trialPackages={packageState.trialPackages}
+      />
 
       <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface">
         {state.loading ? (
@@ -912,6 +1082,215 @@ export default function TrialLessonsPage() {
       </DataSurface>
     </>
   );
+}
+
+function TrialPackageTracker({
+  actionId,
+  loading,
+  mayManage,
+  onLessonSave,
+  onStatusChange,
+  teacherOptionsBySchool,
+  trialPackages
+}) {
+  if (loading) {
+    return (
+      <DataSurface aria-label="Trial package tracker">
+        <div className="table-placeholder">Loading trial packages...</div>
+      </DataSurface>
+    );
+  }
+
+  if (!trialPackages.length) {
+    return null;
+  }
+
+  return (
+    <DataSurface aria-label="Trial package tracker">
+      <div className="section-heading-row">
+        <div>
+          <p className="eyebrow">Trial Package Tracker</p>
+          <h2>Trial Packages</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        {trialPackages.map((trialPackage) => (
+          <TrialPackageCard
+            actionId={actionId}
+            key={trialPackage.id}
+            mayManage={mayManage}
+            onLessonSave={onLessonSave}
+            onStatusChange={onStatusChange}
+            teacherOptions={teacherOptionsBySchool[trialPackage.school_id] || []}
+            trialPackage={trialPackage}
+          />
+        ))}
+      </div>
+    </DataSurface>
+  );
+}
+
+function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, teacherOptions, trialPackage }) {
+  const progress = getTrialPackageProgress(trialPackage);
+  const nextLesson = progress.nextLesson;
+  const nextScheduledLesson = progress.nextScheduledLesson;
+  const lessons = sortTrialPackageLessons(trialPackage.trial_package_lessons || []);
+  const nextSchedule = nextLesson?.lesson_date
+    ? `${formatDate(nextLesson.lesson_date)} ${formatLessonTime(nextLesson.lesson_time)}`
+    : "Not scheduled";
+  const nextScheduledSchedule = nextScheduledLesson
+    ? `${formatDate(nextScheduledLesson.lesson_date)} ${formatLessonTime(nextScheduledLesson.lesson_time)}`
+    : "None scheduled";
+
+  return (
+    <article className="list-card trial-package-card">
+      <div className="list-card-header">
+        <div className="table-cell-stack">
+          <strong>Trial Package - {formatTrialPackageType(trialPackage.package_type)}</strong>
+          <span>{formatTrialPackageSummary(trialPackage)}</span>
+        </div>
+        <StatusBadge value={trialPackage.status} />
+      </div>
+      <div className="trial-package-summary-grid">
+        <div>
+          <span className="eyebrow">Progress</span>
+          <strong>{progress.label}</strong>
+        </div>
+        <div>
+          <span className="eyebrow">Next lesson</span>
+          <strong>
+            {nextLesson ? `Lesson ${nextLesson.lesson_number}/${progress.total} - ${formatTrialPackageLessonStatus(nextLesson.status)}` : "None"}
+          </strong>
+          <span>{nextLesson ? nextSchedule : "All required lessons are closed"}</span>
+        </div>
+        <div>
+          <span className="eyebrow">Next scheduled</span>
+          <strong>
+            {nextScheduledLesson ? `Lesson ${nextScheduledLesson.lesson_number}/${progress.total}` : "None"}
+          </strong>
+          <span>{nextScheduledSchedule}</span>
+        </div>
+        <div>
+          <span className="eyebrow">Teacher</span>
+          <strong>{nextLesson ? formatTrialPackageLessonTeacher(nextLesson) : "No teacher"}</strong>
+        </div>
+        <div>
+          <span className="eyebrow">Unscheduled</span>
+          <strong>{progress.unscheduled}</strong>
+        </div>
+        {mayManage ? (
+          <label>
+            <span className="eyebrow">Package status</span>
+            <select
+              disabled={actionId === trialPackage.id}
+              onChange={(event) => onStatusChange(trialPackage, event.target.value)}
+              value={trialPackage.status}
+            >
+              {trialPackageStatuses.map((status) => (
+                <option key={status.value} value={status.value}>
+                  {status.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+      <div className="trial-package-lessons">
+        {lessons.map((lesson) => (
+          <TrialPackageLessonEditor
+            key={`${lesson.id}:${lesson.status}:${lesson.lesson_date || ""}:${lesson.lesson_time || ""}:${lesson.assigned_teacher_staff_id || ""}`}
+            lesson={lesson}
+            mayManage={mayManage}
+            onSave={onLessonSave}
+            saving={actionId === lesson.id}
+            teacherOptions={teacherOptions}
+            totalLessons={progress.total}
+          />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOptions, totalLessons }) {
+  const [draft, setDraft] = useState(() => buildTrialPackageLessonDraft(lesson));
+
+  function updateDraft(field, value) {
+    setDraft((current) => {
+      const next = { ...current, [field]: value };
+      if ((field === "lessonDate" || field === "lessonTime") && next.lessonDate && next.lessonTime && next.status === "not_scheduled") {
+        next.status = "scheduled";
+      }
+      if (field === "status" && value === "not_scheduled") {
+        next.lessonDate = "";
+        next.lessonTime = "";
+      }
+      return next;
+    });
+  }
+
+  if (!mayManage) {
+    return (
+      <div className="trial-package-lesson-row">
+        <strong>
+          Lesson {lesson.lesson_number}/{totalLessons}
+        </strong>
+        <span>{formatTrialPackageLessonStatus(lesson.status)}</span>
+        <span>{lesson.lesson_date ? `${formatDate(lesson.lesson_date)} ${formatLessonTime(lesson.lesson_time)}` : "Not scheduled"}</span>
+        <span>{formatTrialPackageLessonTeacher(lesson)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="trial-package-lesson-row">
+      <strong>
+        Lesson {lesson.lesson_number}/{totalLessons}
+      </strong>
+      <label>
+        <span>Status</span>
+        <select onChange={(event) => updateDraft("status", event.target.value)} value={draft.status}>
+          {trialPackageLessonStatuses.map((status) => (
+            <option key={status.value} value={status.value}>
+              {status.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Date</span>
+        <input onChange={(event) => updateDraft("lessonDate", event.target.value)} type="date" value={draft.lessonDate} />
+      </label>
+      <label>
+        <span>Time</span>
+        <input onChange={(event) => updateDraft("lessonTime", event.target.value)} type="time" value={draft.lessonTime} />
+      </label>
+      <label>
+        <span>Teacher</span>
+        <select onChange={(event) => updateDraft("assignedTeacherStaffId", event.target.value)} value={draft.assignedTeacherStaffId}>
+          <option value="">No teacher assigned</option>
+          {teacherOptions.map((teacher) => (
+            <option key={teacher.staff_id} value={teacher.staff_id}>
+              {teacher.full_name || teacher.email}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="secondary-button" disabled={saving} onClick={() => onSave(lesson, draft)} type="button">
+        {saving ? "Saving..." : "Save"}
+      </button>
+    </div>
+  );
+}
+
+function buildTrialPackageLessonDraft(lesson) {
+  return {
+    lessonDate: lesson.lesson_date || "",
+    lessonTime: String(lesson.lesson_time || "").slice(0, 5),
+    assignedTeacherStaffId: lesson.assigned_teacher_staff_id || "",
+    status: lesson.status || "not_scheduled",
+    notes: lesson.notes || ""
+  };
 }
 
 function ColumnFilterHeader({ active, children, column, label, onSortChange, sort, sortLabels = { asc: "A-Z", desc: "Z-A" } }) {

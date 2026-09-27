@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { formatClassLevel, formatLessonDay, formatLessonTime, formatLessonType, formatTeacherName } from "@/lib/class-details";
+import { formatLessonDay, formatLessonTime, formatTeacherName } from "@/lib/class-details";
 import { formatClassName } from "@/lib/classes";
 import { deleteClass, fetchClassProfile, updateClass } from "@/lib/data";
 import { formatDate, formatPersonName } from "@/lib/format";
@@ -160,7 +160,7 @@ function ClassProfileContent() {
       <PageHeader
         eyebrow="Teaching operations"
         title={formatClassName(classRow)}
-        description={`${classRow.schools?.name || "School not set"} · ${formatLessonType(classRow.lesson_type)}`}
+        description={classRow.schools?.name || "School not set"}
         actions={
           <div className="form-actions">
             <StatusBadge value={classRow.status} />
@@ -202,24 +202,12 @@ function ClassProfileContent() {
             <dd>{classRow.schools?.name || "Not assigned"}</dd>
           </div>
           <div>
-            <dt>Lesson type</dt>
-            <dd>{formatLessonType(classRow.lesson_type)}</dd>
-          </div>
-          <div>
-            <dt>Level</dt>
-            <dd>{formatClassLevel(classRow)}</dd>
-          </div>
-          <div>
             <dt>Day</dt>
             <dd>{formatLessonDay(classRow.lesson_day)}</dd>
           </div>
           <div>
             <dt>Time</dt>
             <dd>{formatLessonTime(classRow.lesson_time)}</dd>
-          </div>
-          <div>
-            <dt>Teacher</dt>
-            <dd>{formatTeacherName(classRow.assigned_teacher)}</dd>
           </div>
           <div>
             <dt>Status</dt>
@@ -239,6 +227,7 @@ function ClassProfileContent() {
                 <tr>
                   <th>Student</th>
                   <th>Student status</th>
+                  <th>Teacher</th>
                   <th>Enrollment status</th>
                   <th>Start date</th>
                   <th>End date</th>
@@ -255,6 +244,7 @@ function ClassProfileContent() {
                       )}
                     </td>
                     <td>{enrollment.students?.status || "Unknown"}</td>
+                    <td>{formatTeacherName(enrollment.assigned_teacher)}</td>
                     <td>
                       <StatusBadge value={enrollment.status} />
                     </td>
@@ -275,12 +265,9 @@ function ClassProfileContent() {
 
 function buildInactiveClassInput(classRow) {
   return {
-    assignedTeacherProfileId: classRow.assigned_teacher_profile_id,
     classId: classRow.id,
-    classLevelId: classRow.level_id,
     lessonDay: classRow.lesson_day,
     lessonTime: classRow.lesson_time,
-    lessonType: classRow.lesson_type,
     schoolId: classRow.school_id,
     status: "inactive"
   };

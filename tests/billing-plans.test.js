@@ -29,6 +29,14 @@ const classManagementMigration = readFileSync(
   new URL("../supabase/migrations/20260920003000_class_management_and_student_assignment.sql", import.meta.url),
   "utf8"
 );
+const scheduleSlotMigration = readFileSync(
+  new URL("../supabase/migrations/20260920005000_schedule_slot_classes_and_package_courses.sql", import.meta.url),
+  "utf8"
+);
+const staffBasedTeacherAssignmentMigration = readFileSync(
+  new URL("../supabase/migrations/20260920006000_staff_based_teacher_assignments.sql", import.meta.url),
+  "utf8"
+);
 
 test("billing_plans migration creates the minimal finance-scoped plan table", () => {
   assert.match(billingPlansMigration, /create table if not exists public\.billing_plans/);
@@ -132,15 +140,15 @@ test("Student create and edit forms collect Lesson Package separately from Class
   assert.match(studentClassAssignment, /Custom fee/);
   assert.match(studentClassAssignment, /Monthly fee/);
   assert.match(studentClassAssignment, /readOnly=\{Boolean\(selectedBillingPlan\)\}/);
-  assert.match(studentClassAssignment, /packageLocksLessonType/);
-  assert.match(studentClassAssignment, /Lesson type comes from the selected package/);
-  assert.match(studentClassAssignment, /Class/);
+  assert.match(studentClassAssignment, /Class time/);
+  assert.match(studentClassAssignment, /Assigned teacher/);
+  assert.match(studentClassAssignment, /Course/);
   assert.match(studentNewPage, /fetchBillingPlans/);
   assert.match(studentEditPage, /fetchStudentBillingPlanOptions/);
   assert.match(studentEditPage, /fetchStudentFinance/);
   assert.match(studentNewPage + studentEditPage, /<h2>Class Details<\/h2>/);
-  assert.match(studentNewPage + studentEditPage, /getPackageClassCompatibilityError/);
-  assert.match(studentNewPage + studentEditPage, /Choose a class with the same lesson type as the selected Lesson package/);
+  assert.doesNotMatch(studentNewPage + studentEditPage, /getPackageClassCompatibilityError/);
+  assert.doesNotMatch(studentNewPage + studentEditPage, /Choose a class with the same lesson type as the selected Lesson package/);
   assert.match(dataSource, /p_billing_plan_id: emptyToNull\(input\.billingPlanId\)/);
   assert.match(dataSource, /p_monthly_fee_yen: normalizeOptionalInteger\(input\.monthlyFeeYen\)/);
 });
@@ -151,11 +159,17 @@ test("Student Class Details persistence updates billing profiles without mutatin
   assert.match(classManagementMigration, /set billing_plan_id = p_billing_plan_id/);
   assert.match(classManagementMigration, /monthly_fee_yen = v_monthly_fee_yen/);
   assert.match(classManagementMigration, /Inactive Lesson Packages cannot be newly assigned/);
-  assert.match(classManagementMigration, /Selected class lesson type does not match the selected Lesson Package/);
-  assert.match(classManagementMigration, /New class lesson type must match the selected Lesson Package/);
+  assert.match(scheduleSlotMigration, /alter column lesson_type drop not null/);
+  assert.match(scheduleSlotMigration, /alter column level_id drop not null/);
+  assert.match(scheduleSlotMigration, /student_enrollments[\s\S]*add column if not exists assigned_teacher_profile_id uuid/);
+  assert.match(staffBasedTeacherAssignmentMigration, /add column if not exists assigned_teacher_staff_id uuid/);
+  assert.match(staffBasedTeacherAssignmentMigration, /references public\.staff \(id, organization_id\)/);
+  assert.match(scheduleSlotMigration, /classes_school_day_time_uidx/);
+  assert.doesNotMatch(scheduleSlotMigration, /Selected class lesson type does not match the selected Lesson Package/);
+  assert.doesNotMatch(scheduleSlotMigration, /New class lesson type must match the selected Lesson Package/);
   assert.match(classManagementMigration, /perform public\.update_student_class_assignment_billing_mvp/);
   assert.doesNotMatch(classManagementMigration, /postal_address = null|delete from public\.student_addresses/);
-  assert.doesNotMatch(studentClassAssignment.match(/function updateBillingPlan[\s\S]*?}\n  }\n/)?.[0] || "", /classId|assignedTeacherProfileId|lessonDay|lessonTime|classLevelId/);
+  assert.doesNotMatch(studentClassAssignment.match(/function updateBillingPlan[\s\S]*?}\n  }\n/)?.[0] || "", /classId|assignedTeacherStaffId|lessonDay|lessonTime/);
 });
 
 test("Lesson Package helpers validate CRUD-style Settings payloads and display package details", () => {
@@ -163,6 +177,7 @@ test("Lesson Package helpers validate CRUD-style Settings payloads and display p
     {
       name: "Private 30 min x 4",
       lesson_type: "private",
+      class_level_id: "elementary",
       lesson_duration_minutes: 30,
       lessons_per_month: 4,
       monthly_fee_yen: 15800,
@@ -173,6 +188,7 @@ test("Lesson Package helpers validate CRUD-style Settings payloads and display p
 
   assert.equal(form.organizationId, "org-1");
   assert.equal(form.lessonType, "private");
+  assert.equal(form.classLevelId, "elementary");
   assert.equal(form.lessonDurationMinutes, "30");
   assert.equal(form.lessonsPerMonth, "4");
   assert.equal(form.monthlyFeeYen, "15800");
@@ -191,11 +207,12 @@ test("Lesson Package helpers validate CRUD-style Settings payloads and display p
   assert.equal(formatLessonPackageOption({
     name: "Standard",
     lesson_type: "private",
+    class_levels: { label: "Elementary" },
     lesson_duration_minutes: 30,
     lessons_per_month: 4,
     monthly_fee_yen: 15800,
     active: true
-  }), "Standard / Private / 30 min / 4/month - \u00a515,800");
+  }), "Standard / Elementary / Private / 30 min / 4/month - \u00a515,800");
 });
 
 test("Settings > Lesson Packages supports create, edit, deactivate, and no hard delete", () => {
@@ -203,6 +220,7 @@ test("Settings > Lesson Packages supports create, edit, deactivate, and no hard 
   assert.match(settingsPage, /Lesson Packages/);
   assert.match(billingPlansSettingsPage, /Create Lesson Package/);
   assert.match(billingPlansSettingsPage, /Lesson Package Details/);
+  assert.match(billingPlansSettingsPage, /Course/);
   assert.match(billingPlansSettingsPage, /Lesson type/);
   assert.match(billingPlansSettingsPage, /Lesson duration/);
   assert.match(billingPlansSettingsPage, /Lessons per month/);

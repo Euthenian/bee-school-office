@@ -21,6 +21,10 @@ const pendingImportSetScheduleSql = readFileSync(
   new URL("../supabase/migrations/20260918001000_trial_booking_import_set_schedule.sql", import.meta.url),
   "utf8"
 );
+const pendingTrialBookingReviewPage = readFileSync(
+  new URL("../app/(app)/trial-lessons/imports/review/page.js", import.meta.url),
+  "utf8"
+);
 
 const baseInput = {
   organizationId: "11111111-1111-4111-8111-111111111111",
@@ -177,4 +181,34 @@ test("pending import migration preserves RLS and Gmail message idempotency", () 
   assert.match(pendingImportSetScheduleSql, /add column if not exists set_date date/);
   assert.match(pendingImportSetScheduleSql, /add column if not exists set_time time/);
   assert.match(pendingImportSetScheduleSql, /does not replace first\/second preferred source dates/);
+});
+
+test("pending booking review isolates conversion required selects from save corrections validation", () => {
+  const saveFormStart = pendingTrialBookingReviewPage.indexOf(
+    '<form className="student-form" id="pending-trial-booking-review-form" onSubmit={handleSubmit}>'
+  );
+  const saveFormEnd = pendingTrialBookingReviewPage.indexOf("</form>", saveFormStart);
+  const conversionFormStart = pendingTrialBookingReviewPage.indexOf(
+    '<form className="student-form" onSubmit={handleConvertSubmit}>'
+  );
+  const conversionPanelStart = pendingTrialBookingReviewPage.indexOf("<ConversionPanel", conversionFormStart);
+
+  assert.ok(saveFormStart >= 0);
+  assert.ok(saveFormEnd > saveFormStart);
+  assert.ok(conversionFormStart > saveFormEnd);
+  assert.ok(conversionPanelStart > conversionFormStart);
+  assert.equal(pendingTrialBookingReviewPage.slice(saveFormStart, saveFormEnd).includes("conversionForm.levelId"), false);
+  assert.match(
+    pendingTrialBookingReviewPage,
+    /<select onChange=\{\(event\) => onUpdate\("levelId", event\.target\.value\)\} required value=\{conversionForm\.levelId\}>/
+  );
+  assert.match(pendingTrialBookingReviewPage, /levelId: ""/);
+  assert.match(
+    pendingTrialBookingReviewPage,
+    /form="pending-trial-booking-review-form" type="submit"[\s\S]*Save corrections/
+  );
+  assert.match(
+    pendingTrialBookingReviewPage,
+    /<button className="convert-button" disabled=\{!canAttemptConversion \|\| converting\} type="submit">/
+  );
 });

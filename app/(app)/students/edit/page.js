@@ -213,7 +213,7 @@ function EditStudentContent() {
       ...current,
       [field]: value,
       ...(field === "schoolId"
-        ? { assignedTeacherProfileId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
+        ? { assignedTeacherStaffId: "", billingPlanId: "", classAssignmentMode: "existing", classId: "" }
         : {}),
       ...(field === "classAssignmentMode" ? { classId: value === "new" ? "" : current.classId } : {})
     }));
@@ -246,21 +246,16 @@ function EditStudentContent() {
       }
     }
 
-    if (form.classAssignmentMode === "existing" && !form.classId) {
-      setError("Select an existing class or choose Create new class.");
+    if (!form.classId) {
+      setError("Select a class time.");
       setSubmitting(false);
       return;
     }
 
     const selectedBillingPlan = billingPlanOptions.find((plan) => plan.id === form.billingPlanId);
-    const selectedClass = classes.find((classRow) => classRow.id === form.classId);
-    const submitForm = selectedBillingPlan?.lesson_type ? { ...form, lessonType: selectedBillingPlan.lesson_type } : form;
-    const compatibilityError = getPackageClassCompatibilityError(submitForm, selectedBillingPlan, selectedClass);
-    if (compatibilityError) {
-      setError(compatibilityError);
-      setSubmitting(false);
-      return;
-    }
+    const submitForm = selectedBillingPlan
+      ? { ...form, classLevelId: selectedBillingPlan.class_level_id || "", lessonType: selectedBillingPlan.lesson_type || form.lessonType }
+      : form;
 
     if (form.monthlyFeeYen !== "" && !/^\d+$/.test(String(form.monthlyFeeYen))) {
       setError("Monthly fee must be a whole yen amount.");
@@ -279,7 +274,7 @@ function EditStudentContent() {
       studentId,
       ...submitForm,
       contacts,
-      createNewClass: submitForm.classAssignmentMode === "new",
+      createNewClass: false,
       guardians,
       notes
     });
@@ -481,8 +476,7 @@ function EditStudentContent() {
               submitting ||
               loadingFoundation ||
               loadingClasses ||
-              !availableSchools.length ||
-              (form.classAssignmentMode === "new" && !classLevels.length)
+              !availableSchools.length
             }
             type="submit"
           >
@@ -504,16 +498,6 @@ function getBillingPlanOptionsForSchool(plans = [], school = null, currentPlanId
   });
 }
 
-function getPackageClassCompatibilityError(form, selectedBillingPlan, selectedClass) {
-  if (!selectedBillingPlan?.lesson_type) return "";
-
-  const classLessonType = form.classAssignmentMode === "new" ? form.lessonType : selectedClass?.lesson_type;
-  if (classLessonType && classLessonType !== selectedBillingPlan.lesson_type) {
-    return "Choose a class with the same lesson type as the selected Lesson package, or choose Custom fee.";
-  }
-
-  return "";
-}
 
 function EditStudentLoading() {
   return (

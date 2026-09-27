@@ -19,6 +19,7 @@ import {
 import { formatLessonTime, formatLessonType, formatTeacherName, lessonTypes } from "@/lib/class-details";
 import {
   confirmTrialLesson,
+  createTrialPackageFromTrialLesson,
   convertTrialLessonParticipant,
   convertTrialLessonProspect,
   queueCommunication,
@@ -60,6 +61,7 @@ import {
 } from "@/lib/trial-lessons";
 import {
   formatTrialPackageLessonStatus,
+  formatTrialPackageLessonSchedule,
   formatTrialPackageLessonTeacher,
   formatTrialPackageSummary,
   formatTrialPackageType,
@@ -308,6 +310,22 @@ export default function TrialLessonsPage() {
     () => getNearestUpcomingTrialLesson(state.trialLessons, todayKey),
     [state.trialLessons, todayKey]
   );
+  const packagedTrialLessonIds = useMemo(() => {
+    const ids = new Set();
+    for (const trialPackage of packageState.trialPackages) {
+      for (const lesson of trialPackage.trial_package_lessons || []) {
+        if (lesson.trial_lesson_id) {
+          ids.add(lesson.trial_lesson_id);
+        }
+      }
+    }
+    return ids;
+  }, [packageState.trialPackages]);
+  const packagedProspectIds = useMemo(
+    () => new Set(packageState.trialPackages.map((trialPackage) => trialPackage.prospect_id).filter(Boolean)),
+    [packageState.trialPackages]
+  );
+  const isPackageEligibilityLoading = packageState.loading && !packageState.trialPackages.length;
   const selectedTrialLessonCount = validSelectedTrialLessonIds.size;
   const visibleSelectedTrialLessonCount = visibleTrialLessons.filter((trialLesson) => validSelectedTrialLessonIds.has(trialLesson.id)).length;
   const allVisibleSelected =
@@ -316,6 +334,7 @@ export default function TrialLessonsPage() {
     Boolean(search.trim() || statusFilter !== "all" || schoolFilter || teacherFilter) ||
     hasActiveTrialLessonColumnFilters(columnFilters) ||
     hasActiveTrialLessonSort(tableSort);
+  const isUpcomingFilter = statusFilter === "upcoming";
 
   function getBulkEmailDefaultMessageType() {
     return selectedTrialLessons.length && selectedTrialLessons.every((trialLesson) => trialLesson.status === "no_show")
@@ -698,6 +717,31 @@ export default function TrialLessonsPage() {
     setPackageRefreshKey((current) => current + 1);
   }
 
+  async function handleCreatePackageFromTrialLesson(trialLesson) {
+    const actionKey = `create-package:${trialLesson.id}`;
+    setPackageActionId(actionKey);
+    setActionNotice("");
+    setPackageState((current) => ({ ...current, error: "" }));
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setPackageState((current) => ({ ...current, error: "You must be signed in before creating a trial package." }));
+      setPackageActionId("");
+      return;
+    }
+
+    const { error } = await createTrialPackageFromTrialLesson(supabase, trialLesson.id);
+    if (error) {
+      setPackageState((current) => ({ ...current, error: error.message }));
+      setPackageActionId("");
+      return;
+    }
+
+    setActionNotice("4-lesson trial package created from the existing trial lesson.");
+    setPackageActionId("");
+    setPackageRefreshKey((current) => current + 1);
+  }
+
   return (
     <>
       <PageHeader
@@ -875,15 +919,17 @@ export default function TrialLessonsPage() {
         />
       ) : null}
 
-      <TrialPackageTracker
-        actionId={packageActionId}
-        loading={packageState.loading}
-        mayManage={mayManage}
-        onLessonSave={handlePackageLessonSave}
-        onStatusChange={handlePackageStatusChange}
-        teacherOptionsBySchool={packageTeacherOptionsBySchool}
-        trialPackages={packageState.trialPackages}
-      />
+      {isUpcomingFilter ? null : (
+        <TrialPackageTracker
+          actionId={packageActionId}
+          loading={packageState.loading}
+          mayManage={mayManage}
+          onLessonSave={handlePackageLessonSave}
+          onStatusChange={handlePackageStatusChange}
+          teacherOptionsBySchool={packageTeacherOptionsBySchool}
+          trialPackages={packageState.trialPackages}
+        />
+      )}
 
       <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface">
         {state.loading ? (
@@ -1055,24 +1101,36 @@ export default function TrialLessonsPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleTrialLessons.map((trialLesson) => (
-                  <TrialLessonRow
-                    isSelected={validSelectedTrialLessonIds.has(trialLesson.id)}
-                    confirmingId={confirmingId}
-                    convertingId={convertingId}
-                    key={trialLesson.id}
-                    mayManage={mayManage}
-                    onConfirm={handleConfirm}
-                    onConvert={handleConvert}
-                    onSelectionChange={setTrialLessonSelection}
-                    onRequestDelete={handleDeleteRequest}
-                    onOpenComposer={setCommunicatingTrialLesson}
-                    onPhoneFollowUpComplete={handlePhoneFollowUpComplete}
-                    phoneFollowUpId={phoneFollowUpId}
-                    todayKey={todayKey}
-                    trialLesson={trialLesson}
-                  />
-                ))}
+                {visibleTrialLessons.map((trialLesson) => {
+                  const prospectId = getTrialLessonProspectId(trialLesson);
+                  const hasLinkedPackage = packagedTrialLessonIds.has(trialLesson.id);
+                  const hasProspectPackage = Boolean(prospectId && packagedProspectIds.has(prospectId));
+                  const canCreateTrialPackage =
+                    trialLesson.lesson_type === "group" && !hasLinkedPackage && !hasProspectPackage;
+
+                  return (
+                    <TrialLessonRow
+                      canCreateTrialPackage={canCreateTrialPackage}
+                      isSelected={validSelectedTrialLessonIds.has(trialLesson.id)}
+                      confirmingId={confirmingId}
+                      convertingId={convertingId}
+                      isPackageEligibilityLoading={isPackageEligibilityLoading}
+                      packageActionId={packageActionId}
+                      key={trialLesson.id}
+                      mayManage={mayManage}
+                      onConfirm={handleConfirm}
+                      onConvert={handleConvert}
+                      onCreateTrialPackage={handleCreatePackageFromTrialLesson}
+                      onSelectionChange={setTrialLessonSelection}
+                      onRequestDelete={handleDeleteRequest}
+                      onOpenComposer={setCommunicatingTrialLesson}
+                      onPhoneFollowUpComplete={handlePhoneFollowUpComplete}
+                      phoneFollowUpId={phoneFollowUpId}
+                      todayKey={todayKey}
+                      trialLesson={trialLesson}
+                    />
+                  );
+                })}
               </tbody>
             </table>
           </ResponsiveTable>
@@ -1135,11 +1193,9 @@ function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, t
   const nextLesson = progress.nextLesson;
   const nextScheduledLesson = progress.nextScheduledLesson;
   const lessons = sortTrialPackageLessons(trialPackage.trial_package_lessons || []);
-  const nextSchedule = nextLesson?.lesson_date
-    ? `${formatDate(nextLesson.lesson_date)} ${formatLessonTime(nextLesson.lesson_time)}`
-    : "Not scheduled";
+  const nextSchedule = nextLesson ? formatTrialPackageLessonSchedule(nextLesson) || "Not scheduled" : "Not scheduled";
   const nextScheduledSchedule = nextScheduledLesson
-    ? `${formatDate(nextScheduledLesson.lesson_date)} ${formatLessonTime(nextScheduledLesson.lesson_time)}`
+    ? formatTrialPackageLessonSchedule(nextScheduledLesson) || "Not scheduled"
     : "None scheduled";
 
   return (
@@ -1214,6 +1270,8 @@ function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, t
 
 function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOptions, totalLessons }) {
   const [draft, setDraft] = useState(() => buildTrialPackageLessonDraft(lesson));
+  const linkedTrialLesson = lesson.linked_trial_lesson;
+  const lessonSchedule = formatTrialPackageLessonSchedule(lesson) || "Not scheduled";
 
   function updateDraft(field, value) {
     setDraft((current) => {
@@ -1229,15 +1287,20 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
     });
   }
 
-  if (!mayManage) {
+  if (!mayManage || linkedTrialLesson) {
     return (
       <div className="trial-package-lesson-row">
         <strong>
           Lesson {lesson.lesson_number}/{totalLessons}
         </strong>
         <span>{formatTrialPackageLessonStatus(lesson.status)}</span>
-        <span>{lesson.lesson_date ? `${formatDate(lesson.lesson_date)} ${formatLessonTime(lesson.lesson_time)}` : "Not scheduled"}</span>
+        <span>{lessonSchedule}</span>
         <span>{formatTrialPackageLessonTeacher(lesson)}</span>
+        {linkedTrialLesson ? (
+          <span>
+            Linked Trial Lesson: <StatusBadge value={linkedTrialLesson.status || "booked"} />
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -1515,16 +1578,20 @@ function BulkCommunicationComposer({ defaultMessageType, isSignedIn, onCancel, o
 }
 
 function TrialLessonRow({
+  canCreateTrialPackage,
   confirmingId,
   convertingId,
+  isPackageEligibilityLoading,
   mayManage,
   isSelected,
   onConfirm,
   onConvert,
+  onCreateTrialPackage,
   onSelectionChange,
   onOpenComposer,
   onPhoneFollowUpComplete,
   onRequestDelete,
+  packageActionId,
   phoneFollowUpId,
   todayKey,
   trialLesson
@@ -1552,6 +1619,7 @@ function TrialLessonRow({
     trialLesson.trial_date &&
     (!todayKey || trialLesson.trial_date < todayKey);
   const fallbackConversionId = `prospect:${trialLesson.id}`;
+  const createPackageActionId = `create-package:${trialLesson.id}`;
 
   return (
     <tr>
@@ -1633,6 +1701,20 @@ function TrialLessonRow({
                 <ActionIcon name="check" />
               </button>
             ) : null}
+            {canCreateTrialPackage ? (
+              <button
+                className="secondary-button"
+                disabled={isPackageEligibilityLoading || packageActionId === createPackageActionId}
+                onClick={() => onCreateTrialPackage(trialLesson)}
+                type="button"
+              >
+                {packageActionId === createPackageActionId
+                  ? "Creating..."
+                  : isPackageEligibilityLoading
+                    ? "Checking package..."
+                    : "Create 4-Lesson Trial Package"}
+              </button>
+            ) : null}
             <button
               aria-label="Send email"
               className="secondary-button action-icon-button"
@@ -1669,6 +1751,10 @@ function TrialLessonRow({
       ) : null}
     </tr>
   );
+}
+
+function getTrialLessonProspectId(trialLesson) {
+  return trialLesson?.prospect_id || trialLesson?.prospects?.id || "";
 }
 
 function ActionIcon({ name }) {

@@ -125,13 +125,18 @@ function StudentProfileContent() {
     error: "",
     student: null
   });
+  const userId = session?.user?.id || "";
+  const mayLoadBilling = canManageBilling(profile);
+  const mayLoadFinance = canViewStudentFinance(profile);
+  const mayLoadQuestions = canManageStudentQuestions(profile);
+  const mayLoadCommunications = canManageCommunications(profile);
 
   useEffect(() => {
     let active = true;
 
     async function loadStudent() {
       const supabase = getSupabaseBrowserClient();
-      if (!supabase || !session || !studentId) {
+      if (!supabase || !userId || !studentId) {
         setState({
           billing: { charges: [], payments: [], refunds: [], summary: [] },
           billingError: "",
@@ -150,12 +155,9 @@ function StudentProfileContent() {
       }
 
       setState((current) => ({ ...current, loading: true }));
-      const mayLoadBilling = canManageBilling(profile);
-      const mayLoadFinance = canViewStudentFinance(profile);
-      const mayLoadQuestions = canManageStudentQuestions(profile);
       const [{ data, error }, communicationsResult, billingResult, financeResult, questionsResult] = await Promise.all([
         fetchStudentProfile(supabase, studentId),
-        canManageCommunications(profile) ? fetchStudentCommunications(supabase, studentId) : { data: [], error: null },
+        mayLoadCommunications ? fetchStudentCommunications(supabase, studentId) : { data: [], error: null },
         mayLoadBilling
           ? fetchStudentBilling(supabase, studentId)
           : { data: { charges: [], payments: [], refunds: [], summary: [] }, error: null },
@@ -190,7 +192,7 @@ function StudentProfileContent() {
     return () => {
       active = false;
     };
-  }, [profile, session, studentId]);
+  }, [userId, studentId, mayLoadBilling, mayLoadFinance, mayLoadQuestions, mayLoadCommunications]);
 
   function handleCloseBankDetails() {
     setBankDetailsState({
@@ -431,7 +433,7 @@ function StudentProfileContent() {
     );
   }
 
-  if (state.loading) {
+  if (state.loading && !state.student) {
     return (
       <>
         <PageHeader eyebrow="Student profile" title="Loading student" />

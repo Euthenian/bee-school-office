@@ -42,6 +42,7 @@ export function AdminShell({ children }) {
   const [financialDocumentCount, setFinancialDocumentCount] = useState(0);
   const [officeTodoCount, setOfficeTodoCount] = useState(0);
   const [studentQuestionCount, setStudentQuestionCount] = useState(0);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && configured && !session) {
@@ -111,9 +112,64 @@ export function AdminShell({ children }) {
     };
   }, [mayManageFinancialDocuments, mayManageOfficeTodos, mayManageStudentQuestions, mayManageTrialLessons, pathname, session]);
 
+  useEffect(() => {
+    const closeNavigation = window.setTimeout(() => setMobileNavigationOpen(false), 0);
+    return () => window.clearTimeout(closeNavigation);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileNavigationOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setMobileNavigationOpen(false);
+      }
+    }
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileNavigationOpen]);
+
   async function handleSignOut() {
     await signOut();
     router.replace("/login/");
+  }
+
+  function renderNavigationLinks({ onNavigate } = {}) {
+    return navigation.map((item) => {
+      let badgeValue = "";
+      if (item.href === "/trial-lessons/") {
+        badgeValue = formatCountBadgeValue(pendingTrialBookingCount);
+      }
+      if (item.href === "/questions/") {
+        badgeValue = formatCountBadgeValue(studentQuestionCount);
+      }
+      if (item.href === "/expenses/financial-docs/") {
+        badgeValue = formatCountBadgeValue(financialDocumentCount);
+      }
+      if (item.href === "/todo/") {
+        badgeValue = formatCountBadgeValue(officeTodoCount);
+      }
+
+      return (
+        <Link
+          className={`nav-link ${isNavigationItemActive(pathname, item.href) ? "active" : ""}`}
+          href={item.href}
+          key={item.href}
+          onClick={onNavigate}
+        >
+          <span>{item.label}</span>
+          {badgeValue ? <span className="nav-count-badge">{badgeValue}</span> : null}
+        </Link>
+      );
+    });
   }
 
   if (loading) {
@@ -135,8 +191,41 @@ export function AdminShell({ children }) {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className={`app-shell ${mobileNavigationOpen ? "mobile-nav-open" : ""}`}>
+      <header className="mobile-shell-header">
+        <Link className="brand-stack" href="/dashboard/">
+          <div className="brand-mark" aria-hidden="true">
+            B
+          </div>
+          <div>
+            <p className="eyebrow">Bee School</p>
+            <h1>Office</h1>
+          </div>
+        </Link>
+        <button
+          aria-controls="mobile-navigation-drawer"
+          aria-expanded={mobileNavigationOpen}
+          aria-label={mobileNavigationOpen ? "Close navigation" : "Open navigation"}
+          className="mobile-menu-button"
+          onClick={() => setMobileNavigationOpen((current) => !current)}
+          type="button"
+        >
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+        </button>
+      </header>
+
+      {mobileNavigationOpen ? (
+        <button
+          aria-label="Close navigation"
+          className="mobile-nav-overlay"
+          onClick={() => setMobileNavigationOpen(false)}
+          type="button"
+        />
+      ) : null}
+
+      <aside className="sidebar" id="mobile-navigation-drawer">
         <Link className="brand-stack" href="/dashboard/">
           <div className="brand-mark" aria-hidden="true">
             B
@@ -148,37 +237,21 @@ export function AdminShell({ children }) {
         </Link>
 
         <nav className="nav-list" aria-label="Main navigation">
-          {navigation.map((item) => {
-            let badgeValue = "";
-            if (item.href === "/trial-lessons/") {
-              badgeValue = formatCountBadgeValue(pendingTrialBookingCount);
-            }
-            if (item.href === "/questions/") {
-              badgeValue = formatCountBadgeValue(studentQuestionCount);
-            }
-            if (item.href === "/expenses/financial-docs/") {
-              badgeValue = formatCountBadgeValue(financialDocumentCount);
-            }
-            if (item.href === "/todo/") {
-              badgeValue = formatCountBadgeValue(officeTodoCount);
-            }
-
-            return (
-              <Link
-                className={`nav-link ${isNavigationItemActive(pathname, item.href) ? "active" : ""}`}
-                href={item.href}
-                key={item.href}
-              >
-                <span>{item.label}</span>
-                {badgeValue ? <span className="nav-count-badge">{badgeValue}</span> : null}
-              </Link>
-            );
-          })}
+          {renderNavigationLinks({ onNavigate: () => setMobileNavigationOpen(false) })}
         </nav>
 
         <div className="sidebar-footer">
           <strong>{profile?.full_name || session.user.email || "Signed in"}</strong>
           <span>{highestRole ? roleLabels[highestRole] : "No role assigned"}</span>
+        </div>
+
+        <div className="mobile-drawer-footer">
+          <strong>{profile?.full_name || "Signed in"}</strong>
+          <span>{session.user.email}</span>
+          <span>{highestRole ? roleLabels[highestRole] : "No role assigned"}</span>
+          <button className="ghost-button" onClick={handleSignOut} type="button">
+            Log out
+          </button>
         </div>
       </aside>
 

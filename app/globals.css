@@ -782,6 +782,17 @@ th {
   text-transform: uppercase;
 }
 
+.amount-column {
+  text-align: right;
+}
+
+.finance-total-line {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 16px 18px;
+}
+
 .trial-lessons-surface {
   overflow: visible;
 }

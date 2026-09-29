@@ -370,6 +370,11 @@ export default function FinancePage() {
   return (
     <>
       <PageHeader
+        actions={
+          <Link className="secondary-button" href="/finance/monthly-payments/">
+            Monthly payments
+          </Link>
+        }
         eyebrow="Restricted admin"
         title="Finance"
         description="A management overview of student cash, payroll cash, and operating expenses."

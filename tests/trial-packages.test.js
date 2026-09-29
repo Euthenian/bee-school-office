@@ -24,6 +24,10 @@ const trialPackageSchedulingMigrationSql = readFileSync(
   new URL("../supabase/migrations/20260927003000_link_scheduled_trial_package_lessons.sql", import.meta.url),
   "utf8"
 );
+const trialPackageRescheduleMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20260929001000_reschedule_linked_trial_package_lessons.sql", import.meta.url),
+  "utf8"
+);
 const trialLessonsPage = readFileSync(new URL("../app/(app)/trial-lessons/page.js", import.meta.url), "utf8");
 const newTrialLessonPage = readFileSync(new URL("../app/(app)/trial-lessons/new/page.js", import.meta.url), "utf8");
 const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
@@ -212,4 +216,27 @@ test("scheduled package lesson save creates and links one canonical trial lesson
   assert.match(trialPackageSchedulingMigrationSql, /v_package\.lesson_type,\s+v_package\.level_id,\s+'booked'/);
   assert.match(trialPackageSchedulingMigrationSql, /update public\.trial_package_lessons[\s\S]*trial_lesson_id = v_trial_lesson_id[\s\S]*where id = v_lesson\.id[\s\S]*and trial_lesson_id is null/);
   assert.match(trialPackageSchedulingMigrationSql, /raise exception 'Trial package lesson % was linked by another request\. Retry the save\.'/);
+});
+
+test("linked scheduled package lessons can be rescheduled through their canonical trial lesson", () => {
+  assert.match(trialLessonsPage, /const \[editingLinkedLesson, setEditingLinkedLesson\] = useState\(false\)/);
+  assert.match(trialLessonsPage, /const closedPackageLessonStatuses = \["completed", "cancelled", "no_show"\]/);
+  assert.match(trialLessonsPage, /const closedTrialLessonStatuses = \["completed", "joined", "did_not_join", "cancelled", "no_show"\]/);
+  assert.match(trialLessonsPage, /!closedPackageLessonStatuses\.includes\(lesson\.status\)/);
+  assert.match(trialLessonsPage, /!closedTrialLessonStatuses\.includes\(linkedTrialLesson\.status\)/);
+  assert.match(trialLessonsPage, />\s*Reschedule\s*<\/button>/);
+  assert.match(trialLessonsPage, /setDraft\(buildTrialPackageLessonDraft\(lesson\)\)/);
+  assert.match(trialLessonsPage, /onClick=\{saveLesson\}/);
+  assert.match(trialPackageRescheduleMigrationSql, /if v_lesson\.trial_lesson_id is not null then/);
+  assert.match(trialPackageRescheduleMigrationSql, /from public\.trial_lessons tl[\s\S]*where tl\.id = v_lesson\.trial_lesson_id[\s\S]*for update;/);
+  assert.match(trialPackageRescheduleMigrationSql, /raise exception 'Linked trial package lessons cannot be changed back to not scheduled/);
+  assert.match(trialPackageRescheduleMigrationSql, /update public\.trial_lessons[\s\S]*trial_date = p_lesson_date[\s\S]*trial_time = p_lesson_time/);
+  assert.match(trialPackageRescheduleMigrationSql, /assigned_teacher_profile_id = v_assigned_teacher_profile_id/);
+  assert.match(trialPackageRescheduleMigrationSql, /status = v_trial_status/);
+  assert.match(trialPackageRescheduleMigrationSql, /update public\.trial_package_lessons[\s\S]*assigned_teacher_staff_id = p_assigned_teacher_staff_id[\s\S]*notes = v_notes/);
+  assert.match(trialPackageRescheduleMigrationSql, /return v_lesson\.id;/);
+  assert.doesNotMatch(
+    trialPackageRescheduleMigrationSql.match(/if v_lesson\.trial_lesson_id is not null then[\s\S]*?return v_lesson\.id;/)?.[0] || "",
+    /create_trial_lesson_for_prospect_mvp/
+  );
 });

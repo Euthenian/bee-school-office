@@ -40,6 +40,15 @@ export function StudentFinanceForm({
     }));
   }
 
+  function updateEntrancePackagePaid(value) {
+    const paid = value === "true";
+    setForm((current) => ({
+      ...current,
+      entrancePackagePaid: paid,
+      entrancePackagePaidAt: paid ? current.entrancePackagePaidAt : ""
+    }));
+  }
+
   function handleSubmit(event) {
     event.preventDefault();
     setLocalError("");
@@ -107,6 +116,30 @@ export function StudentFinanceForm({
           <label>
             Postal address
             <textarea onChange={(event) => updateField("postalAddress", event.target.value)} rows="4" value={form.postalAddress} />
+          </label>
+        </div>
+      </DataSurface>
+
+      <DataSurface>
+        <SurfaceHeader>
+          <h2>Entrance Package</h2>
+        </SurfaceHeader>
+        <div className="form-grid">
+          <label>
+            Paid
+            <select onChange={(event) => updateEntrancePackagePaid(event.target.value)} value={form.entrancePackagePaid ? "true" : "false"}>
+              <option value="false">No</option>
+              <option value="true">Yes</option>
+            </select>
+          </label>
+          <label>
+            Payment date
+            <input
+              disabled={!form.entrancePackagePaid}
+              onChange={(event) => updateField("entrancePackagePaidAt", event.target.value)}
+              type="date"
+              value={form.entrancePackagePaid ? form.entrancePackagePaidAt : ""}
+            />
           </label>
         </div>
       </DataSurface>

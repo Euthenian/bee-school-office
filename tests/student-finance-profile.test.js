@@ -22,6 +22,10 @@ const migrationSql = readFileSync(
   new URL("../supabase/migrations/20260911001000_student_profile_finance_access.sql", import.meta.url),
   "utf8"
 );
+const entrancePackageMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20260928001000_student_entrance_package_finance.sql", import.meta.url),
+  "utf8"
+);
 const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
 const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/page.js", import.meta.url), "utf8");
 const studentFinanceEditPage = readFileSync(new URL("../app/(app)/students/finance/edit/page.js", import.meta.url), "utf8");
@@ -47,6 +51,7 @@ test("Student Profile finance helpers format monthly fee and masked bank values 
   assert.equal(hasStudentFinanceData(finance), true);
   assert.equal(hasStudentFinanceData(null), false);
   assert.equal(hasStudentFinanceData({}), false);
+  assert.equal(hasStudentFinanceData({ entrance_package_paid: true }), true);
   assert.equal(JSON.stringify(finance).includes("1234567"), false);
 });
 
@@ -68,10 +73,50 @@ test("Student finance form preserves leading-zero bank fields as text and valida
   assert.equal(form.accountNumber, "0000123");
   assert.equal(form.bankCode, "0177");
   assert.equal(form.branchCode, "004");
+  assert.equal(form.entrancePackagePaid, false);
+  assert.equal(form.entrancePackagePaidAt, "");
   assert.equal(validateStudentFinanceForm(form, { canEditBankDetails: true }), "");
   assert.equal(validateStudentFinanceForm({ ...form, accountNumber: "123" }, { canEditBankDetails: true }), "Account number must be seven digits.");
   assert.equal(normalizeStudentFinancePayload(form, { canEditBankDetails: true }).accountNumber, "0000123");
   assert.equal(normalizeStudentFinancePayload(form, { canEditBankDetails: false }).accountNumber, undefined);
+});
+
+test("entrance package finance fields load and save through the controlled finance path", () => {
+  const finance = normalizeStudentFinance({
+    entrance_package_paid: true,
+    entrance_package_paid_at: "2026-09-28"
+  });
+  const form = createStudentFinanceForm(finance, {});
+  const paidPayload = normalizeStudentFinancePayload(form, { canEditBankDetails: false });
+  const unpaidPayload = normalizeStudentFinancePayload(
+    { ...form, entrancePackagePaid: false, entrancePackagePaidAt: "2026-09-28" },
+    { canEditBankDetails: false }
+  );
+
+  assert.equal(finance.entrance_package_paid, true);
+  assert.equal(finance.entrance_package_paid_at, "2026-09-28");
+  assert.equal(form.entrancePackagePaid, true);
+  assert.equal(form.entrancePackagePaidAt, "2026-09-28");
+  assert.equal(paidPayload.entrancePackagePaid, true);
+  assert.equal(paidPayload.entrancePackagePaidAt, "2026-09-28");
+  assert.equal(unpaidPayload.entrancePackagePaid, false);
+  assert.equal(unpaidPayload.entrancePackagePaidAt, null);
+
+  assert.match(entrancePackageMigrationSql, /alter table public\.student_billing_profiles[\s\S]*entrance_package_paid boolean not null default false/);
+  assert.match(entrancePackageMigrationSql, /entrance_package_paid_at date/);
+  assert.match(entrancePackageMigrationSql, /check \(entrance_package_paid or entrance_package_paid_at is null\)/);
+  assert.match(entrancePackageMigrationSql, /returns table \([\s\S]*entrance_package_paid boolean[\s\S]*entrance_package_paid_at date/);
+  assert.match(entrancePackageMigrationSql, /coalesce\(v_billing\.entrance_package_paid, false\)/);
+  assert.match(
+    entrancePackageMigrationSql,
+    /update public\.student_billing_profiles[\s\S]*entrance_package_paid = v_entrance_package_paid[\s\S]*entrance_package_paid_at = v_entrance_package_paid_at/
+  );
+  assert.match(entrancePackageMigrationSql, /grant execute on function public\.update_student_finance_mvp\(uuid, uuid, integer, text, boolean, text, text, text, text, text, text, text, text, date, date, boolean, date\) to authenticated/);
+  assert.match(dataSource, /p_entrance_package_paid: payload\.entrancePackagePaid/);
+  assert.match(dataSource, /p_entrance_package_paid_at: payload\.entrancePackagePaidAt \?\? null/);
+  assert.match(studentFinanceForm, /<h2>Entrance Package<\/h2>/);
+  assert.match(studentFinanceForm, /disabled=\{!form\.entrancePackagePaid\}/);
+  assert.match(studentFinanceForm, /entrancePackagePaidAt: paid \? current\.entrancePackagePaidAt : ""/);
 });
 
 test("UI role helpers expose finance to office staff but full bank details only to restricted admins", () => {

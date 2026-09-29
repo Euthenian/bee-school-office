@@ -1270,8 +1270,18 @@ function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, t
 
 function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOptions, totalLessons }) {
   const [draft, setDraft] = useState(() => buildTrialPackageLessonDraft(lesson));
+  const [editingLinkedLesson, setEditingLinkedLesson] = useState(false);
   const linkedTrialLesson = lesson.linked_trial_lesson;
   const lessonSchedule = formatTrialPackageLessonSchedule(lesson) || "Not scheduled";
+  const closedPackageLessonStatuses = ["completed", "cancelled", "no_show"];
+  const closedTrialLessonStatuses = ["completed", "joined", "did_not_join", "cancelled", "no_show"];
+  const canRescheduleLinkedLesson = Boolean(
+    mayManage &&
+      linkedTrialLesson &&
+      !closedPackageLessonStatuses.includes(lesson.status) &&
+      !closedTrialLessonStatuses.includes(linkedTrialLesson.status)
+  );
+  const showEditor = Boolean(mayManage && (!linkedTrialLesson || editingLinkedLesson));
 
   function updateDraft(field, value) {
     setDraft((current) => {
@@ -1287,7 +1297,19 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
     });
   }
 
-  if (!mayManage || linkedTrialLesson) {
+  function cancelLinkedLessonEdit() {
+    setDraft(buildTrialPackageLessonDraft(lesson));
+    setEditingLinkedLesson(false);
+  }
+
+  function saveLesson() {
+    onSave(lesson, draft);
+    if (linkedTrialLesson) {
+      setEditingLinkedLesson(false);
+    }
+  }
+
+  if (!showEditor) {
     return (
       <div className="trial-package-lesson-row">
         <strong>
@@ -1300,6 +1322,11 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
           <span>
             Linked Trial Lesson: <StatusBadge value={linkedTrialLesson.status || "booked"} />
           </span>
+        ) : null}
+        {canRescheduleLinkedLesson ? (
+          <button className="secondary-button" disabled={saving} onClick={() => setEditingLinkedLesson(true)} type="button">
+            Reschedule
+          </button>
         ) : null}
       </div>
     );
@@ -1339,9 +1366,14 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
           ))}
         </select>
       </label>
-      <button className="secondary-button" disabled={saving} onClick={() => onSave(lesson, draft)} type="button">
+      <button className="secondary-button" disabled={saving} onClick={saveLesson} type="button">
         {saving ? "Saving..." : "Save"}
       </button>
+      {linkedTrialLesson ? (
+        <button className="ghost-button" disabled={saving} onClick={cancelLinkedLessonEdit} type="button">
+          Cancel
+        </button>
+      ) : null}
     </div>
   );
 }

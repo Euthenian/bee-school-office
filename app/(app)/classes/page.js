@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { formatLessonDay, formatLessonTime } from "@/lib/class-details";
-import { classStatuses, filterClasses, formatClassName, getClassActiveStudentCount } from "@/lib/classes";
+import { classStatuses, classStudentOccupancyFilters, filterClasses, formatClassName, getClassActiveStudentCount } from "@/lib/classes";
 import { deleteClass, fetchClasses, fetchSchools, updateClass } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -17,7 +17,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 export default function ClassesPage() {
   const { profile, session } = useAuth();
   const mayManage = canManageClasses(profile);
-  const [filters, setFilters] = useState({ schoolId: "all", search: "", status: "active" });
+  const [filters, setFilters] = useState({ schoolId: "all", search: "", status: "active", studentOccupancy: "all" });
   const [state, setState] = useState({ classes: [], error: "", loading: true, schools: [] });
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
@@ -183,6 +183,19 @@ export default function ClassesPage() {
             ))}
           </select>
         </label>
+        <label>
+          Students
+          <select
+            onChange={(event) => setFilters((current) => ({ ...current, studentOccupancy: event.target.value }))}
+            value={filters.studentOccupancy}
+          >
+            {classStudentOccupancyFilters.map((filter) => (
+              <option key={filter.value} value={filter.value}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
@@ -218,34 +231,38 @@ export default function ClassesPage() {
                 </tr>
               </thead>
               <tbody>
-                {classes.map((classRow) => (
-                  <tr key={classRow.id}>
-                    <td>
-                      <Link href={`/classes/profile/?id=${classRow.id}`}>{formatClassName(classRow)}</Link>
-                    </td>
-                    <td>{classRow.schools?.name || "Not assigned"}</td>
-                    <td>{formatLessonDay(classRow.lesson_day)}</td>
-                    <td>{formatLessonTime(classRow.lesson_time)}</td>
-                    <td>
-                      <StatusBadge value={classRow.status} />
-                    </td>
-                    <td>{getClassActiveStudentCount(classRow)}</td>
-                    <td className="classes-actions-cell">
-                      <div className="table-actions classes-row-actions">
-                        <Link className="secondary-button" href={`/classes/profile/?id=${classRow.id}`}>
-                          View
-                        </Link>
-                        <Link className="secondary-button" href={`/classes/edit/?id=${classRow.id}`}>
-                          Edit
-                        </Link>
-                        <button className="danger-button class-delete-button" onClick={() => handleDeleteRequest(classRow)} type="button">
-                          <TrashIcon />
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {classes.map((classRow) => {
+                  const studentCount = getClassActiveStudentCount(classRow);
+
+                  return (
+                    <tr className={studentCount >= 1 ? "classes-occupied-row" : ""} key={classRow.id}>
+                      <td>
+                        <Link href={`/classes/profile/?id=${classRow.id}`}>{formatClassName(classRow)}</Link>
+                      </td>
+                      <td>{classRow.schools?.name || "Not assigned"}</td>
+                      <td>{formatLessonDay(classRow.lesson_day)}</td>
+                      <td>{formatLessonTime(classRow.lesson_time)}</td>
+                      <td>
+                        <StatusBadge value={classRow.status} />
+                      </td>
+                      <td>{studentCount}</td>
+                      <td className="classes-actions-cell">
+                        <div className="table-actions classes-row-actions">
+                          <Link className="secondary-button" href={`/classes/profile/?id=${classRow.id}`}>
+                            View
+                          </Link>
+                          <Link className="secondary-button" href={`/classes/edit/?id=${classRow.id}`}>
+                            Edit
+                          </Link>
+                          <button className="danger-button class-delete-button" onClick={() => handleDeleteRequest(classRow)} type="button">
+                            <TrashIcon />
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </ResponsiveTable>

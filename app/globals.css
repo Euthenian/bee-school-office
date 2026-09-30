@@ -1373,6 +1373,10 @@ dd {
   gap: 6px;
 }
 
+.classes-occupied-row {
+  background-color: #5F9EA0;
+}
+
 .classes-actions-column,
 .classes-actions-cell {
   min-width: 214px;

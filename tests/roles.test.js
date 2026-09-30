@@ -21,7 +21,7 @@ import {
   validateStudentRefundForm
 } from "../lib/billing.js";
 import { formatClassSummary, formatLessonTime, lessonDays, lessonTypes } from "../lib/class-details.js";
-import { filterClasses, formatClassOption, getClassActiveStudentCount } from "../lib/classes.js";
+import { classStudentOccupancyFilters, filterClasses, formatClassOption, getClassActiveStudentCount } from "../lib/classes.js";
 import {
   addContactRow,
   createContactRowsFromStudentContacts,
@@ -451,6 +451,21 @@ test("class management uses explicit classes and enrollment assignment", () => {
   assert.deepEqual(filterClasses(classRows, { search: "monday", schoolId: "all", status: "active" }).map((row) => row.id), [
     "class-1"
   ]);
+  assert.deepEqual(filterClasses(classRows, { schoolId: "all", status: "all", studentOccupancy: "all" }).map((row) => row.id), [
+    "class-1",
+    "class-2"
+  ]);
+  assert.deepEqual(filterClasses(classRows, { schoolId: "all", status: "all", studentOccupancy: "with_students" }).map((row) => row.id), [
+    "class-1"
+  ]);
+  assert.deepEqual(filterClasses(classRows, { schoolId: "all", status: "all", studentOccupancy: "without_students" }).map((row) => row.id), [
+    "class-2"
+  ]);
+  assert.deepEqual(filterClasses(classRows, { schoolId: "school-1", status: "active", studentOccupancy: "with_students" }).map((row) => row.id), [
+    "class-1"
+  ]);
+  assert.deepEqual(filterClasses(classRows, { schoolId: "all", status: "active", studentOccupancy: "without_students" }).map((row) => row.id), []);
+  assert.deepEqual(classStudentOccupancyFilters.map((filter) => filter.label), ["All", "With students", "Without students"]);
   assert.equal(canManageClasses({ school_memberships: [{ role: "school_manager" }] }), true);
   assert.equal(canManageClasses({ school_memberships: [{ role: "teacher" }] }), false);
   assert.equal(
@@ -460,6 +475,8 @@ test("class management uses explicit classes and enrollment assignment", () => {
 
   assert.match(classesPage, /fetchClasses/);
   assert.match(classesPage, /Students/);
+  assert.match(classesPage, /studentOccupancy/);
+  assert.match(classesPage, /classes-occupied-row/);
   assert.match(classesPage, /deleteClass/);
   assert.match(classesPage, /ClassDeleteDialog/);
   assert.match(classesPage, /classes-actions-column/);

@@ -11,9 +11,11 @@ import { DataSurface, ResponsiveTable, SurfaceHeader } from "@/components/Surfac
 import { useAuth } from "@/components/AuthProvider";
 import { formatLessonDay, formatLessonTime, formatTeacherName } from "@/lib/class-details";
 import { formatClassName } from "@/lib/classes";
-import { deleteClass, fetchClassProfile, updateClass } from "@/lib/data";
+import { getDefaultStudentEmail } from "@/lib/communication-templates";
+import { bulkQueueClassStudentEmails, deleteClass, fetchClassProfile, updateClass } from "@/lib/data";
 import { formatDate, formatPersonName } from "@/lib/format";
-import { canManageClasses } from "@/lib/roles";
+import { canManageClasses, canManageCommunications } from "@/lib/roles";
+import { isValidStudentEmail } from "@/lib/students";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function ClassProfilePage() {
@@ -30,10 +32,16 @@ function ClassProfileContent() {
   const classId = searchParams.get("id") || "";
   const { profile, session } = useAuth();
   const mayManage = canManageClasses(profile);
+  const mayCommunicate = canManageCommunications(profile);
   const [state, setState] = useState({ classRow: null, error: "", loading: true });
   const [deleteError, setDeleteError] = useState("");
   const [deactivating, setDeactivating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [mailDialogOpen, setMailDialogOpen] = useState(false);
+  const [mailError, setMailError] = useState("");
+  const [mailForm, setMailForm] = useState({ body: "", subject: "" });
+  const [mailSubmitting, setMailSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
@@ -100,10 +108,66 @@ function ClassProfileContent() {
 
   const classRow = state.classRow;
   const enrollments = classRow.student_enrollments || [];
+  const activeEnrollments = enrollments.filter((enrollment) => enrollment.status === "active");
+  const activeStudents = activeEnrollments.map((enrollment) => enrollment.students).filter(Boolean);
+  const emailRecipientCount = activeStudents.filter((student) => isValidStudentEmail(getDefaultStudentEmail(student))).length;
+  const noEmailCount = activeStudents.length - emailRecipientCount;
 
   function handleDeleteRequest() {
     setDeleteError("");
     setShowDeleteDialog(true);
+  }
+
+  function handleEmailStudentsOpen() {
+    setMailError("");
+    setMailDialogOpen(true);
+  }
+
+  function handleEmailStudentsCancel() {
+    if (mailSubmitting) return;
+    setMailError("");
+    setMailDialogOpen(false);
+  }
+
+  function updateMailField(field, value) {
+    setMailForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleEmailStudentsSubmit(event) {
+    event.preventDefault();
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setMailError("You must be signed in to send class email.");
+      return;
+    }
+
+    setMailSubmitting(true);
+    setMailError("");
+    setNotice("");
+
+    const { data, error } = await bulkQueueClassStudentEmails(
+      supabase,
+      {
+        body: mailForm.body,
+        classId: classRow.id,
+        subject: mailForm.subject
+      },
+      profile
+    );
+
+    if (error) {
+      setMailError(error.message);
+      setMailSubmitting(false);
+      return;
+    }
+
+    setMailDialogOpen(false);
+    setMailSubmitting(false);
+    setMailForm({ body: "", subject: "" });
+    setNotice(
+      `${data.queued} email${data.queued === 1 ? "" : "s"} queued.${data.skipped ? ` ${data.skipped} student${data.skipped === 1 ? "" : "s"} skipped because no email address is available.` : ""}`
+    );
   }
 
   function handleDeleteCancel() {
@@ -164,6 +228,16 @@ function ClassProfileContent() {
         actions={
           <div className="form-actions">
             <StatusBadge value={classRow.status} />
+            {mayCommunicate ? (
+              <button
+                className="secondary-button"
+                disabled={!activeStudents.length || !emailRecipientCount}
+                onClick={handleEmailStudentsOpen}
+                type="button"
+              >
+                Email Students
+              </button>
+            ) : null}
             <Link className="secondary-button" href={`/classes/edit/?id=${classRow.id}`}>
               Edit class
             </Link>
@@ -179,6 +253,7 @@ function ClassProfileContent() {
       />
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
+      {notice ? <p className="inline-success">{notice}</p> : null}
 
       {showDeleteDialog ? (
         <ClassDeleteDialog
@@ -189,6 +264,22 @@ function ClassProfileContent() {
           onCancel={handleDeleteCancel}
           onConfirm={handleDeleteConfirm}
           onDeactivate={handleDeactivateConfirm}
+        />
+      ) : null}
+
+      {mailDialogOpen ? (
+        <ClassBulkMailDialog
+          activeStudentCount={activeStudents.length}
+          body={mailForm.body}
+          error={mailError}
+          noEmailCount={noEmailCount}
+          onBodyChange={(value) => updateMailField("body", value)}
+          onCancel={handleEmailStudentsCancel}
+          onSubmit={handleEmailStudentsSubmit}
+          onSubjectChange={(value) => updateMailField("subject", value)}
+          recipientCount={emailRecipientCount}
+          subject={mailForm.subject}
+          submitting={mailSubmitting}
         />
       ) : null}
 
@@ -271,6 +362,68 @@ function buildInactiveClassInput(classRow) {
     schoolId: classRow.school_id,
     status: "inactive"
   };
+}
+
+function ClassBulkMailDialog({
+  activeStudentCount,
+  body,
+  error,
+  noEmailCount,
+  onBodyChange,
+  onCancel,
+  onSubmit,
+  onSubjectChange,
+  recipientCount,
+  subject,
+  submitting
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-labelledby="class-bulk-mail-title" aria-modal="true" className="communication-modal" role="dialog">
+        <header className="communication-modal-header">
+          <div>
+            <p className="eyebrow">Class communication</p>
+            <h2 id="class-bulk-mail-title">Email Students</h2>
+          </div>
+          <button className="ghost-button" disabled={submitting} onClick={onCancel} type="button">
+            Cancel
+          </button>
+        </header>
+        <form className="student-form" onSubmit={onSubmit}>
+          <div className="confirmation-modal-body">
+            <p>
+              {activeStudentCount} active student{activeStudentCount === 1 ? "" : "s"} /{" "}
+              {recipientCount} email recipient{recipientCount === 1 ? "" : "s"}
+              {noEmailCount ? ` / ${noEmailCount} without email` : ""}
+            </p>
+            {error ? <p className="inline-alert">{error}</p> : null}
+            <label className="form-field">
+              <span>Subject</span>
+              <input
+                disabled={submitting}
+                onChange={(event) => onSubjectChange(event.target.value)}
+                required
+                type="text"
+                value={subject}
+              />
+            </label>
+            <label className="form-field">
+              <span>Message body</span>
+              <textarea disabled={submitting} onChange={(event) => onBodyChange(event.target.value)} required value={body} />
+            </label>
+          </div>
+          <div className="form-actions confirmation-modal-actions">
+            <button className="secondary-button" disabled={submitting} onClick={onCancel} type="button">
+              Cancel
+            </button>
+            <button className="primary-button" disabled={submitting || !recipientCount} type="submit">
+              {submitting ? "Queuing..." : `Queue ${recipientCount} email${recipientCount === 1 ? "" : "s"}`}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function TrashIcon() {

@@ -222,9 +222,10 @@ test("Student finance edit route is static-export compatible and saves through t
   assert.doesNotMatch(studentFinanceForm, /type="number"/);
   assert.match(studentFinanceForm, /maxLength="7"/);
   assert.match(dataSource, /update_student_finance_mvp/);
+  assert.match(dataSource, /p_legacy_customer_id: payload\.legacyCustomerId \?\? ""/);
 });
 
-test("legacy owner-review Rico rows stay untouched by profile finance work", () => {
+test("Finance Edit exposes Rico ID through the existing legacy customer field without touching owner-review rows", () => {
   const productionImportScript = readFileSync(
     new URL("../scripts/legacy-finance-banking-import-production.js", import.meta.url),
     "utf8"
@@ -232,5 +233,7 @@ test("legacy owner-review Rico rows stay untouched by profile finance work", () 
 
   assert.match(productionImportScript, /OWNER_REVIEW_ROWS = \[15, 26\]/);
   assert.doesNotMatch(migrationSql, /legacy_finance_banking_import_rows[\s\S]*matched_student_id/);
-  assert.doesNotMatch(studentFinanceEditPage, /legacy_finance_banking_import_rows|OWNER_REVIEW_ROWS|Rico/);
+  assert.doesNotMatch(studentFinanceEditPage, /legacy_finance_banking_import_rows|OWNER_REVIEW_ROWS/);
+  assert.match(studentFinanceForm, /Rico ID/);
+  assert.match(studentFinanceForm, /legacyCustomerId/);
 });

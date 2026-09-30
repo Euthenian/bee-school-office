@@ -90,8 +90,8 @@ function EditStudentFinanceContent() {
 
   const canEditBankDetails = Boolean(state.finance?.can_edit_bank_details && mayEditBankDetails);
   const initialForm = useMemo(
-    () => createStudentFinanceForm(state.finance || {}, state.bankDetails || {}),
-    [state.bankDetails, state.finance]
+    () => createStudentFinanceForm(state.finance || {}, state.bankDetails || {}, state.student || {}),
+    [state.bankDetails, state.finance, state.student]
   );
   const cancelHref = studentId ? `/students/profile/?id=${studentId}` : "/students/";
   const hasFinance = hasStudentFinanceData(state.finance);

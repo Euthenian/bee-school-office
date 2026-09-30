@@ -111,6 +111,10 @@ export function StudentFinanceForm({
               value={form.billingEndDate}
             />
           </label>
+          <label>
+            Rico ID
+            <input onChange={(event) => updateField("legacyCustomerId", event.target.value)} value={form.legacyCustomerId} />
+          </label>
         </div>
         <div className="form-grid single-column">
           <label>

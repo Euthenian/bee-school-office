@@ -371,6 +371,10 @@ function EditStudentContent() {
               <input onChange={(event) => updateField("preferredName", event.target.value)} value={form.preferredName} />
             </label>
             <label>
+              Rico ID
+              <input onChange={(event) => updateField("legacyCustomerId", event.target.value)} value={form.legacyCustomerId} />
+            </label>
+            <label>
               Status
               <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
                 {studentStatuses.map((status) => (
@@ -423,6 +427,10 @@ function EditStudentContent() {
             <label>
               Start date
               <input onChange={(event) => updateField("startDate", event.target.value)} type="date" value={form.startDate} />
+            </label>
+            <label>
+              Last lesson date
+              <input onChange={(event) => updateField("lastLessonDate", event.target.value)} type="date" value={form.lastLessonDate} />
             </label>
           </div>
         </DataSurface>

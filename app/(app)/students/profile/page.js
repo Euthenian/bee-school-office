@@ -551,6 +551,14 @@ function StudentProfileContent() {
               <dd>{formatDate(student.start_date)}</dd>
             </div>
             <div>
+              <dt>Last lesson date</dt>
+              <dd>{formatDate(student.last_lesson_date)}</dd>
+            </div>
+            <div>
+              <dt>Rico ID</dt>
+              <dd>{student.legacy_customer_id || "Not set"}</dd>
+            </div>
+            <div>
               <dt>Date of birth</dt>
               <dd>{formatDate(student.date_of_birth)}</dd>
             </div>

@@ -13,6 +13,8 @@ import {
   fetchSchools,
   fetchStudentMonthlyBillingSnapshots,
   fetchStudentMonthlyBillingStopAlerts,
+  fetchUnverifiedRicoCancellations,
+  verifyRicoCancellation,
   updateStudentMonthlyBillingSnapshot
 } from "@/lib/data";
 import { formatBillingAmount } from "@/lib/billing";
@@ -27,15 +29,19 @@ import {
 } from "@/lib/finance";
 import { formatDate } from "@/lib/format";
 import {
+  attachRicoCancellationAlerts,
   createMonthlyBillingFilters,
   filterMonthlyBillingRows,
   getBillingStopAlertLabel,
+  getFirstUnbillableMonthLabel,
   getMonthOptions,
   getUpcomingBillingChangeCount,
   getYearOptions,
   monthlyBillingStatusFilters,
+  shouldZeroMonthlyBilling,
   syncBillingMonthFromParts
 } from "@/lib/monthly-billing";
+import { ricoCancellationFilterRequestedEvent, ricoCancellationUpdatedEvent } from "@/lib/navigation-badges";
 import { canManageFinance } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -62,11 +68,30 @@ export default function FinancePage() {
     error: "",
     loading: true,
     savingId: "",
-    snapshots: []
+    snapshots: [],
+    ricoCancellations: [],
+    verifyingId: ""
   });
   const [snapshotEdits, setSnapshotEdits] = useState({});
   const [foundation, setFoundation] = useState({ loading: true, organizations: [], schools: [] });
   const [state, setState] = useState({ loading: true, error: "", summaryRows: [] });
+
+  useEffect(() => {
+    function showRicoCancellations() {
+      setMonthlyFilters((current) => ({ ...current, status: "rico-cancellation" }));
+      document.getElementById("monthly-billing")?.scrollIntoView();
+    }
+    const timer = window.setTimeout(() => {
+      if (new URLSearchParams(window.location.search).get("filter") === "rico-cancellation") {
+        showRicoCancellations();
+      }
+    }, 0);
+    window.addEventListener(ricoCancellationFilterRequestedEvent, showRicoCancellations);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener(ricoCancellationFilterRequestedEvent, showRicoCancellations);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -161,14 +186,15 @@ export default function FinancePage() {
     const timer = window.setTimeout(async () => {
       const supabase = getSupabaseBrowserClient();
       if (!supabase || !session || !mayManage || !monthlyFilters.organizationId) {
-        setMonthlyState((current) => ({ ...current, alerts: [], loading: false, snapshots: [] }));
+        setMonthlyState((current) => ({ ...current, alerts: [], loading: false, ricoCancellations: [], snapshots: [] }));
         return;
       }
 
       setMonthlyState((current) => ({ ...current, loading: true }));
-      const [snapshotsResult, alertsResult] = await Promise.all([
+      const [snapshotsResult, alertsResult, ricoResult] = await Promise.all([
         fetchStudentMonthlyBillingSnapshots(supabase, monthlyFilters),
-        fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters)
+        fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters),
+        fetchUnverifiedRicoCancellations(supabase, monthlyFilters)
       ]);
       if (!active) return;
 
@@ -176,11 +202,12 @@ export default function FinancePage() {
       setMonthlyState((current) => ({
         ...current,
         alerts: alertsResult.data || [],
-        error: [snapshotsResult.error, alertsResult.error]
+        error: [snapshotsResult.error, alertsResult.error, ricoResult.error]
           .filter(Boolean)
           .map((error) => error.message)
           .join(" "),
         loading: false,
+        ricoCancellations: ricoResult.data || [],
         snapshots: snapshotsResult.data || []
       }));
     }, 180);
@@ -206,8 +233,11 @@ export default function FinancePage() {
   const loading = foundation.loading || state.loading;
   const periodLabel = `${formatDate(filters.dateFrom)} - ${formatDate(filters.dateTo)}`;
   const monthlyRows = useMemo(
-    () => filterMonthlyBillingRows(monthlyState.snapshots, monthlyFilters),
-    [monthlyFilters, monthlyState.snapshots]
+    () => filterMonthlyBillingRows(
+      attachRicoCancellationAlerts(monthlyState.snapshots, monthlyState.ricoCancellations, monthlyFilters.billingMonth),
+      monthlyFilters
+    ),
+    [monthlyFilters, monthlyState.snapshots, monthlyState.ricoCancellations]
   );
   const upcomingBillingChangeCount = monthlyState.alerts.length || getUpcomingBillingChangeCount(monthlyState.snapshots);
   const selectedMonthLabel = formatDate(monthlyFilters.billingMonth);
@@ -294,9 +324,10 @@ export default function FinancePage() {
       return;
     }
 
-    const [snapshotsResult, alertsResult] = await Promise.all([
+    const [snapshotsResult, alertsResult, ricoResult] = await Promise.all([
       fetchStudentMonthlyBillingSnapshots(supabase, monthlyFilters),
-      fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters)
+      fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters),
+      fetchUnverifiedRicoCancellations(supabase, monthlyFilters)
     ]);
 
     setSnapshotEdits({});
@@ -305,12 +336,37 @@ export default function FinancePage() {
       alerts: alertsResult.data || [],
       createResult: result.data,
       creating: false,
-      error: [snapshotsResult.error, alertsResult.error]
+      error: [snapshotsResult.error, alertsResult.error, ricoResult.error]
         .filter(Boolean)
         .map((error) => error.message)
         .join(" "),
+      ricoCancellations: ricoResult.data || [],
       snapshots: snapshotsResult.data || []
     }));
+  }
+
+  async function handleVerifyRicoCancellation(row) {
+    if (!row.ricoCancellation || !mayManage) return;
+    const studentName = [row.student_last_name, row.student_first_name].filter(Boolean).join(" ") || row.student_preferred_name;
+    if (!window.confirm(`Confirm that RICO direct debit cancellation has been checked for ${studentName}?`)) return;
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+    setMonthlyState((current) => ({ ...current, error: "", verifyingId: row.ricoCancellation.profile_id }));
+    const result = await verifyRicoCancellation(supabase, row.ricoCancellation.profile_id, monthlyFilters.billingMonth);
+    if (result.error) {
+      setMonthlyState((current) => ({ ...current, error: result.error.message, verifyingId: "" }));
+      return;
+    }
+
+    const refreshed = await fetchUnverifiedRicoCancellations(supabase, monthlyFilters);
+    setMonthlyState((current) => ({
+      ...current,
+      error: refreshed.error?.message || "",
+      ricoCancellations: refreshed.data || [],
+      verifyingId: ""
+    }));
+    window.dispatchEvent(new Event(ricoCancellationUpdatedEvent));
   }
 
   async function handleSaveMonthlySnapshot(row) {
@@ -606,7 +662,7 @@ export default function FinancePage() {
         </dl>
       </DataSurface>
 
-      <DataSurface aria-label="Monthly student billing">
+      <DataSurface aria-label="Monthly student billing" id="monthly-billing">
         <SurfaceHeader
           actions={
             <button className="primary-button" disabled={monthlyState.creating || !monthlyFilters.organizationId} onClick={handleCreateMonthlyBilling} type="button">
@@ -725,7 +781,7 @@ export default function FinancePage() {
                   const studentName = [row.student_last_name, row.student_first_name].filter(Boolean).join(" ") || row.student_preferred_name;
 
                   return (
-                    <tr key={row.id}>
+                    <tr className={row.ricoCancellation ? "monthly-billing-rico-warning" : ""} key={row.id || `rico-${row.student_id}`}>
                       <td>
                         <strong>{studentName}</strong>
                         <br />
@@ -736,41 +792,59 @@ export default function FinancePage() {
                         <span className="muted-text">Snapshot base {formatBillingAmount(row.base_amount, row.currency)}</span>
                       </td>
                       <td>
-                        <input
-                          className="monthly-billing-amount-input"
-                          inputMode="decimal"
-                          onChange={(event) => updateSnapshotEdit(row.id, "finalAmount", event.target.value)}
-                          value={edit.finalAmount ?? row.final_amount}
-                        />
+                        {row.id ? (
+                          <input
+                            className="monthly-billing-amount-input"
+                            inputMode="decimal"
+                            onChange={(event) => updateSnapshotEdit(row.id, "finalAmount", event.target.value)}
+                            value={edit.finalAmount ?? row.final_amount}
+                          />
+                        ) : formatBillingAmount(row.final_amount, row.currency)}
                       </td>
                       <td>
-                        <textarea
-                          className="monthly-billing-comment"
-                          onChange={(event) => updateSnapshotEdit(row.id, "comment", event.target.value)}
-                          rows="2"
-                          value={edit.comment ?? row.comment ?? ""}
-                        />
+                        {row.id ? (
+                          <textarea
+                            className="monthly-billing-comment"
+                            onChange={(event) => updateSnapshotEdit(row.id, "comment", event.target.value)}
+                            rows="2"
+                            value={edit.comment ?? row.comment ?? ""}
+                          />
+                        ) : <span className="muted-text">No snapshot for this month</span>}
                       </td>
                       <td>
-                        <input
-                          className="monthly-billing-amount-input"
-                          inputMode="decimal"
-                          onChange={(event) => updateSnapshotEdit(row.id, "refundAmount", event.target.value)}
-                          value={edit.refundAmount ?? row.refund_amount}
-                        />
+                        {row.id ? (
+                          <input
+                            className="monthly-billing-amount-input"
+                            inputMode="decimal"
+                            onChange={(event) => updateSnapshotEdit(row.id, "refundAmount", event.target.value)}
+                            value={edit.refundAmount ?? row.refund_amount}
+                          />
+                        ) : formatBillingAmount(0, row.currency)}
                       </td>
                       <td>
                         <StatusStack alertLabel={alertLabel} row={row} />
                       </td>
                       <td>
-                        <button
-                          className="secondary-button"
-                          disabled={monthlyState.savingId === row.id}
-                          onClick={() => handleSaveMonthlySnapshot(row)}
-                          type="button"
-                        >
-                          {monthlyState.savingId === row.id ? "Saving..." : "Save"}
-                        </button>
+                        {row.id ? (
+                          <button
+                            className="secondary-button"
+                            disabled={monthlyState.savingId === row.id}
+                            onClick={() => handleSaveMonthlySnapshot(row)}
+                            type="button"
+                          >
+                            {monthlyState.savingId === row.id ? "Saving..." : "Save"}
+                          </button>
+                        ) : null}
+                        {row.ricoCancellation ? (
+                          <button
+                            className="secondary-button"
+                            disabled={monthlyState.verifyingId === row.ricoCancellation.profile_id}
+                            onClick={() => handleVerifyRicoCancellation(row)}
+                            type="button"
+                          >
+                            {monthlyState.verifyingId === row.ricoCancellation.profile_id ? "Verifying..." : "Mark RICO cancellation verified"}
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -823,6 +897,12 @@ function FinanceMetricCard({ href, label, loading, tone = "neutral", value }) {
 function StatusStack({ alertLabel, row }) {
   return (
     <div className="monthly-billing-status-stack">
+      {row.ricoCancellation ? <span className="status-badge rico-cancellation-status">RICO cancellation to verify</span> : null}
+      {row.ricoCancellation ? (
+        <span className="rico-cancellation-instruction">
+          Do not charge from {getFirstUnbillableMonthLabel(row.ricoCancellation.billing_end_date)}
+        </span>
+      ) : null}
       {alertLabel ? (
         <span className="upcoming-trial-lesson-indicator">
           <span aria-hidden="true" className="upcoming-trial-lesson-star">
@@ -833,7 +913,11 @@ function StatusStack({ alertLabel, row }) {
       ) : null}
       <span className={`status-badge ${row.student_status}`}>{row.student_status}</span>
       {row.manual_override ? <span className="status-badge manual_review">Manual override</span> : null}
-      {row.current_billing_end_date ? <span className="muted-text">Billing ends {formatDate(row.current_billing_end_date)}</span> : null}
+      {row.current_billing_end_date ? (
+        <span className="muted-text">
+          Billing {shouldZeroMonthlyBilling(row.current_billing_end_date, row.billing_month) ? "ended" : "ends"} {formatDate(row.current_billing_end_date)}
+        </span>
+      ) : null}
     </div>
   );
 }

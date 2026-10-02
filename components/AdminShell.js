@@ -10,12 +10,14 @@ import {
   fetchFinancialDocumentBadgeCount,
   fetchOfficeTodoBadgeCount,
   fetchPendingTrialBookingImportCount,
-  fetchStudentQuestionBadgeCount
+  fetchStudentQuestionBadgeCount,
+  fetchUnverifiedRicoCancellations
 } from "@/lib/data";
 import { financialDocumentsUpdatedEvent } from "@/lib/financial-documents";
-import { formatCountBadgeValue } from "@/lib/navigation-badges";
+import { formatCountBadgeValue, ricoCancellationFilterRequestedEvent, ricoCancellationUpdatedEvent } from "@/lib/navigation-badges";
 import {
   canManageFinancialDocuments,
+  canManageFinance,
   canManageOfficeTodos,
   canManageStudentQuestions,
   canManageTrialLessons,
@@ -34,6 +36,7 @@ export function AdminShell({ children }) {
   const navigation = getVisibleNavigation(profile);
   const highestRole = getHighestRole(profile);
   const mayManageFinancialDocuments = canManageFinancialDocuments(profile);
+  const mayManageFinance = canManageFinance(profile);
   const mayManageOfficeTodos = canManageOfficeTodos(profile);
   const mayManageStudentQuestions = canManageStudentQuestions(profile);
   const mayManageTrialLessons = canManageTrialLessons(profile);
@@ -42,6 +45,7 @@ export function AdminShell({ children }) {
   const [financialDocumentCount, setFinancialDocumentCount] = useState(0);
   const [officeTodoCount, setOfficeTodoCount] = useState(0);
   const [studentQuestionCount, setStudentQuestionCount] = useState(0);
+  const [ricoCancellationCount, setRicoCancellationCount] = useState(0);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
 
   useEffect(() => {
@@ -59,6 +63,7 @@ export function AdminShell({ children }) {
         setFinancialDocumentCount(0);
         setOfficeTodoCount(0);
         setStudentQuestionCount(0);
+        setRicoCancellationCount(0);
         return;
       }
 
@@ -68,16 +73,18 @@ export function AdminShell({ children }) {
         setFinancialDocumentCount(0);
         setOfficeTodoCount(0);
         setStudentQuestionCount(0);
+        setRicoCancellationCount(0);
         return;
       }
 
-      const [pendingTrialBookings, dueQuestions, pendingFinancialDocuments, openTodos] = await Promise.all([
+      const [pendingTrialBookings, dueQuestions, pendingFinancialDocuments, openTodos, ricoCancellations] = await Promise.all([
         mayManageTrialLessons
           ? fetchPendingTrialBookingImportCount(supabase, { reviewStatus: "needs_action" })
           : { count: 0, error: null },
         mayManageStudentQuestions ? fetchStudentQuestionBadgeCount(supabase) : { count: 0, error: null },
         mayManageFinancialDocuments ? fetchFinancialDocumentBadgeCount(supabase) : { count: 0, error: null },
-        mayManageOfficeTodos ? fetchOfficeTodoBadgeCount(supabase) : { count: 0, error: null }
+        mayManageOfficeTodos ? fetchOfficeTodoBadgeCount(supabase) : { count: 0, error: null },
+        mayManageFinance ? fetchUnverifiedRicoCancellations(supabase) : { count: 0, error: null }
       ]);
 
       if (!active) return;
@@ -97,20 +104,25 @@ export function AdminShell({ children }) {
       if (!openTodos.error) {
         setOfficeTodoCount(openTodos.count || 0);
       }
+      if (!ricoCancellations.error) {
+        setRicoCancellationCount(ricoCancellations.count || 0);
+      }
     }
 
     loadNavigationBadgeCounts();
     window.addEventListener(studentQuestionsUpdatedEvent, loadNavigationBadgeCounts);
     window.addEventListener(financialDocumentsUpdatedEvent, loadNavigationBadgeCounts);
     window.addEventListener(officeTodosUpdatedEvent, loadNavigationBadgeCounts);
+    window.addEventListener(ricoCancellationUpdatedEvent, loadNavigationBadgeCounts);
 
     return () => {
       active = false;
       window.removeEventListener(studentQuestionsUpdatedEvent, loadNavigationBadgeCounts);
       window.removeEventListener(financialDocumentsUpdatedEvent, loadNavigationBadgeCounts);
       window.removeEventListener(officeTodosUpdatedEvent, loadNavigationBadgeCounts);
+      window.removeEventListener(ricoCancellationUpdatedEvent, loadNavigationBadgeCounts);
     };
-  }, [mayManageFinancialDocuments, mayManageOfficeTodos, mayManageStudentQuestions, mayManageTrialLessons, pathname, session]);
+  }, [mayManageFinance, mayManageFinancialDocuments, mayManageOfficeTodos, mayManageStudentQuestions, mayManageTrialLessons, pathname, session]);
 
   useEffect(() => {
     const closeNavigation = window.setTimeout(() => setMobileNavigationOpen(false), 0);
@@ -157,13 +169,21 @@ export function AdminShell({ children }) {
       if (item.href === "/todo/") {
         badgeValue = formatCountBadgeValue(officeTodoCount);
       }
+      if (item.href === "/finance/") {
+        badgeValue = formatCountBadgeValue(ricoCancellationCount);
+      }
 
       return (
         <Link
           className={`nav-link ${isNavigationItemActive(pathname, item.href) ? "active" : ""}`}
-          href={item.href}
+          href={item.href === "/finance/" && badgeValue ? "/finance/?filter=rico-cancellation#monthly-billing" : item.href}
           key={item.href}
-          onClick={onNavigate}
+          onClick={() => {
+            if (item.href === "/finance/" && badgeValue) {
+              window.dispatchEvent(new Event(ricoCancellationFilterRequestedEvent));
+            }
+            onNavigate?.();
+          }}
         >
           <span>{item.label}</span>
           {badgeValue ? <span className="nav-count-badge">{badgeValue}</span> : null}

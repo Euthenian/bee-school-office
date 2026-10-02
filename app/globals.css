@@ -714,6 +714,26 @@ textarea:focus {
   gap: 6px;
 }
 
+.monthly-billing-rico-warning > td {
+  background: #fff0f0;
+  border-bottom-color: #e79696;
+  color: #402020;
+}
+
+.monthly-billing-rico-warning .muted-text {
+  color: #713b3b;
+}
+
+.rico-cancellation-status {
+  background: #b42318;
+  color: #ffffff;
+}
+
+.rico-cancellation-instruction {
+  color: #8f1d18;
+  font-weight: 700;
+}
+
 .data-surface {
   min-width: 0;
   overflow: hidden;

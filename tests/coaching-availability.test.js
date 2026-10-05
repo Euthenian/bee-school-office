@@ -57,6 +57,13 @@ test("one-off blocks split, clip, cover, overlap, and adjoin without zero-length
     [range("12:00", "15:00"), range("18:00", "21:00")]);
 });
 
+test("confirmed Coaching reservations subtract occupied time; cancelled ones do not", () => {
+  const confirmed = { staffId: "pedro", localDate: monday, startTime: "14:00", endTime: "14:30" };
+  assert.deepEqual(intervals({ coachingReservations: [confirmed] }),
+    [range("12:00", "14:00"), range("14:30", "21:00")]);
+  assert.deepEqual(intervals({ coachingReservations: [] }), [range("12:00", "21:00")]);
+});
+
 test("regular Bee occupancy subtracts by Coach and class, including multiple lessons", () => {
   assert.deepEqual(intervals({ regularLessons: [regular()] }),
     [range("12:00", "18:00"), range("18:50", "21:00")]);

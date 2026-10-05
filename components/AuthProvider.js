@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { shouldReplaceVisibleSession } from "@/lib/auth-session";
 import { loadProfile } from "@/lib/auth-profile";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -12,6 +13,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileError, setProfileError] = useState("");
+  const currentUserId = useRef(null);
 
   const refreshProfile = useCallback(async (userId) => {
     const supabase = getSupabaseBrowserClient();
@@ -44,7 +46,10 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      setSession(data.session);
+      currentUserId.current = data.session?.user?.id || null;
+      setSession((current) =>
+        shouldReplaceVisibleSession(current, data.session, "INITIAL_SESSION") ? data.session : current
+      );
       if (data.session?.user) {
         await refreshProfile(data.session.user.id);
       }
@@ -57,11 +62,16 @@ export function AuthProvider({ children }) {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      if (nextSession?.user) {
-        refreshProfile(nextSession.user.id);
-      } else {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      const nextUserId = nextSession?.user?.id || null;
+      const identityChanged = currentUserId.current !== nextUserId;
+      currentUserId.current = nextUserId;
+      setSession((current) =>
+        shouldReplaceVisibleSession(current, nextSession, event) ? nextSession : current
+      );
+      if (nextUserId && (identityChanged || event === "USER_UPDATED")) {
+        refreshProfile(nextUserId);
+      } else if (!nextUserId) {
         setProfile(null);
         setProfileError("");
       }
@@ -79,6 +89,7 @@ export function AuthProvider({ children }) {
       await supabase.auth.signOut();
     }
     setSession(null);
+    currentUserId.current = null;
     setProfile(null);
   }, []);
 

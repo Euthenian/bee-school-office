@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { CompensationTermForm, CompensationTermsList } from "@/components/CompensationTermForm";
+import { StaffCapacityEditor } from "@/components/StaffCapacityEditor";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -238,6 +239,8 @@ function StaffProfileContent() {
             <DetailRow label="Notes" value={staffMember.notes} />
           </dl>
         </DataSurface>
+
+        <StaffCapacityEditor staff={staffMember} />
 
         {mayManagePayroll ? (
           <DataSurface className="span-two">

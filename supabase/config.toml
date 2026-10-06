@@ -1,2 +1,5 @@
 [functions.gmail-financial-documents-poll]
 verify_jwt = false
+
+[functions.internal-coaching-slots]
+verify_jwt = false

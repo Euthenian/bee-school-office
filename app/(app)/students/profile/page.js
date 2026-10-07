@@ -74,6 +74,7 @@ import {
   createStudentQuestionForm,
   getStudentQuestionDisplayStatus,
   getTodayDateString,
+  isSystemStudentQuestion,
   isStudentQuestionOverdue,
   notifyStudentQuestionsUpdated,
   removeStudentQuestionById,
@@ -939,12 +940,17 @@ function StudentQuestionsTable({
           {questions.map((question) => (
             <tr className={isStudentQuestionOverdue(question, today) ? "overdue-row" : ""} key={question.id}>
               <td>{formatDate(question.reminder_date)}</td>
-              <td>{question.question}</td>
+              <td>
+                {question.question}
+                {isSystemStudentQuestion(question) ? <span className="muted-text"> · Automatic billing reminder</span> : null}
+              </td>
               <td>
                 <StatusBadge value={getStudentQuestionDisplayStatus(question, today)} />
               </td>
               <td>
-                {dateTarget?.id === question.id ? (
+                {isSystemStudentQuestion(question) ? (
+                  <span className="muted-text">Resolve the entrance-fee balance in Billing / Payments.</span>
+                ) : dateTarget?.id === question.id ? (
                   <form className="inline-date-form" onSubmit={onSaveDate}>
                     <input
                       aria-label="Reminder date"

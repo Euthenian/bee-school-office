@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { CommunicationComposer } from "@/components/CommunicationComposer";
+import { CommunicationTemplateManager } from "@/components/CommunicationTemplateManager";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -10,7 +12,7 @@ import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchCommunications } from "@/lib/data";
 import { formatDateTime, humanize } from "@/lib/format";
-import { canManageCommunications } from "@/lib/roles";
+import { canManageBilling, canManageCommunications } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function CommunicationsPage() {
@@ -28,7 +30,11 @@ function CommunicationsContent() {
   const prospectId = searchParams.get("prospectId") || "";
   const trialLessonId = searchParams.get("trialLessonId") || "";
   const mayCommunicate = canManageCommunications(profile);
+  const mayEditTemplates = canManageBilling(profile);
   const [state, setState] = useState({ communications: [], error: "", loading: true });
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [sendNotice, setSendNotice] = useState("");
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -65,7 +71,7 @@ function CommunicationsContent() {
     return () => {
       active = false;
     };
-  }, [authLoading, mayCommunicate, prospectId, session, studentId, trialLessonId]);
+  }, [authLoading, historyVersion, mayCommunicate, prospectId, session, studentId, trialLessonId]);
 
   if (state.loading) {
     return <CommunicationsLoading />;
@@ -84,8 +90,8 @@ function CommunicationsContent() {
     <>
       <PageHeader
         eyebrow="Communications"
-        title="Communication history"
-        description="Outbound customer messages recorded through Bee School Office."
+        title="Communication Center"
+        description="Choose a student and template, preview the resolved email, and review communication history."
         actions={
           studentId ? (
             <Link className="secondary-button" href={`/students/profile/?id=${studentId}`}>
@@ -97,7 +103,23 @@ function CommunicationsContent() {
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
 
-      <DataSurface aria-label="Communication history">
+      <DataSurface aria-label="Send email" className="communication-center-section">
+        <div className="communication-center-heading"><div><p className="eyebrow">Communication Center</p><h2>Send</h2></div></div>
+        <p>Choose a template and student, then preview the resolved email before sending.</p>
+        <button className="primary-button" onClick={() => { setSendNotice(""); setComposerOpen(true); }} type="button">Send email</button>
+        {sendNotice ? <p className="inline-success">{sendNotice}</p> : null}
+      </DataSurface>
+
+      <CommunicationTemplateManager canEdit={mayEditTemplates} session={session} />
+
+      {composerOpen ? <CommunicationComposer context={{ studentId, studentTemplateMode: true }} onCancel={() => setComposerOpen(false)} onSent={() => {
+        setComposerOpen(false);
+        setSendNotice("Email queued. Its delivery status appears in history below.");
+        setHistoryVersion((current) => current + 1);
+      }} /> : null}
+
+      <DataSurface aria-label="Communication history" className="communication-center-section">
+        <div className="communication-center-heading"><div><p className="eyebrow">Communication Center</p><h2>Communication history</h2></div></div>
         {state.communications.length ? (
           <ResponsiveTable>
             <table>

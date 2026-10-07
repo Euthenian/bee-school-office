@@ -37,7 +37,6 @@ import {
   getActiveEnrollment
 } from "@/lib/class-details";
 import { groupStudentContacts } from "@/lib/contacts";
-import { buildStudentCommunicationContext, getDefaultStudentEmail } from "@/lib/communication-templates";
 import { formatDate, formatEnrollment, formatPersonName, formatStudentAge, humanize } from "@/lib/format";
 import {
   changeStudentQuestionDate,
@@ -497,14 +496,7 @@ function StudentProfileContent() {
 
       {composerOpen ? (
         <CommunicationComposer
-          context={{
-            defaultMessageType: "general_message",
-            defaultRecipient: getDefaultStudentEmail(student),
-            organizationId: student.organization_id,
-            schoolId: student.school_id,
-            studentId: student.id,
-            templateContext: buildStudentCommunicationContext(student)
-          }}
+          context={{ studentId: student.id }}
           onCancel={() => setComposerOpen(false)}
           onSent={handleEmailSent}
         />

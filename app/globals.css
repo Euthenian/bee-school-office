@@ -1488,6 +1488,62 @@ dd {
   padding: 0 18px 18px;
 }
 
+.communication-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 18px;
+  padding: 14px;
+}
+
+.communication-preview-body {
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+.communication-center-section {
+  margin-bottom: 20px;
+  padding: 18px;
+}
+
+.communication-center-heading,
+.communication-template-row,
+.communication-send-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.communication-center-heading h2 {
+  margin: 0 0 12px;
+}
+
+.communication-send-controls label {
+  flex: 1 1 220px;
+}
+
+.communication-template-row {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.communication-template-row span {
+  color: var(--muted);
+  display: block;
+}
+
+.communication-template-form {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+}
+
+.communication-variable-choice {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .confirmation-modal {
   max-width: 420px;
 }

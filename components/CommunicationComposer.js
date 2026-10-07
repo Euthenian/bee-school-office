@@ -5,8 +5,16 @@ import { useAuth } from "@/components/AuthProvider";
 import { communicationMessageTypes, buildCommunicationDraft } from "@/lib/communication-templates";
 import { queueCommunication } from "@/lib/data";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { StudentTemplateComposer } from "@/components/StudentTemplateComposer";
 
 export function CommunicationComposer({ context, onCancel, onSent }) {
+  if (context?.studentTemplateMode || (context?.studentId && !context?.trialLessonId)) {
+    return <StudentTemplateComposer studentId={context.studentId} onCancel={onCancel} onSent={onSent} />;
+  }
+  return <LegacyCommunicationComposer context={context} onCancel={onCancel} onSent={onSent} />;
+}
+
+function LegacyCommunicationComposer({ context, onCancel, onSent }) {
   const { session } = useAuth();
   const templateContext = useMemo(() => context?.templateContext || {}, [context]);
   const initialDraft = useMemo(

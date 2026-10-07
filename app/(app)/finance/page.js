@@ -12,6 +12,7 @@ import {
   fetchOrganizations,
   fetchSchools,
   fetchStudentMonthlyBillingSnapshots,
+  fetchStudentMonthlyCollectionCharges,
   fetchStudentMonthlyBillingStopAlerts,
   fetchUnverifiedRicoCancellations,
   verifyRicoCancellation,
@@ -35,6 +36,7 @@ import {
   getBillingStopAlertLabel,
   getFirstUnbillableMonthLabel,
   getMonthOptions,
+  getMonthlyCollectionBreakdown,
   getUpcomingBillingChangeCount,
   getYearOptions,
   monthlyBillingStatusFilters,
@@ -69,6 +71,8 @@ export default function FinancePage() {
     loading: true,
     savingId: "",
     snapshots: [],
+    collectionCharges: [],
+    collectionError: "",
     ricoCancellations: [],
     verifyingId: ""
   });
@@ -186,15 +190,16 @@ export default function FinancePage() {
     const timer = window.setTimeout(async () => {
       const supabase = getSupabaseBrowserClient();
       if (!supabase || !session || !mayManage || !monthlyFilters.organizationId) {
-        setMonthlyState((current) => ({ ...current, alerts: [], loading: false, ricoCancellations: [], snapshots: [] }));
+        setMonthlyState((current) => ({ ...current, alerts: [], collectionCharges: [], collectionError: "", loading: false, ricoCancellations: [], snapshots: [] }));
         return;
       }
 
       setMonthlyState((current) => ({ ...current, loading: true }));
-      const [snapshotsResult, alertsResult, ricoResult] = await Promise.all([
+      const [snapshotsResult, alertsResult, ricoResult, chargesResult] = await Promise.all([
         fetchStudentMonthlyBillingSnapshots(supabase, monthlyFilters),
         fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters),
-        fetchUnverifiedRicoCancellations(supabase, monthlyFilters)
+        fetchUnverifiedRicoCancellations(supabase, monthlyFilters),
+        fetchStudentMonthlyCollectionCharges(supabase, monthlyFilters)
       ]);
       if (!active) return;
 
@@ -202,7 +207,9 @@ export default function FinancePage() {
       setMonthlyState((current) => ({
         ...current,
         alerts: alertsResult.data || [],
-        error: [snapshotsResult.error, alertsResult.error, ricoResult.error]
+        collectionCharges: chargesResult.data || [],
+        collectionError: chargesResult.error?.message || "",
+        error: [snapshotsResult.error, alertsResult.error, ricoResult.error, chargesResult.error]
           .filter(Boolean)
           .map((error) => error.message)
           .join(" "),
@@ -324,19 +331,22 @@ export default function FinancePage() {
       return;
     }
 
-    const [snapshotsResult, alertsResult, ricoResult] = await Promise.all([
+    const [snapshotsResult, alertsResult, ricoResult, chargesResult] = await Promise.all([
       fetchStudentMonthlyBillingSnapshots(supabase, monthlyFilters),
       fetchStudentMonthlyBillingStopAlerts(supabase, monthlyFilters),
-      fetchUnverifiedRicoCancellations(supabase, monthlyFilters)
+      fetchUnverifiedRicoCancellations(supabase, monthlyFilters),
+      fetchStudentMonthlyCollectionCharges(supabase, monthlyFilters)
     ]);
 
     setSnapshotEdits({});
     setMonthlyState((current) => ({
       ...current,
       alerts: alertsResult.data || [],
+      collectionCharges: chargesResult.data || [],
+      collectionError: chargesResult.error?.message || "",
       createResult: result.data,
       creating: false,
-      error: [snapshotsResult.error, alertsResult.error, ricoResult.error]
+      error: [snapshotsResult.error, alertsResult.error, ricoResult.error, chargesResult.error]
         .filter(Boolean)
         .map((error) => error.message)
         .join(" "),
@@ -768,6 +778,7 @@ export default function FinancePage() {
                   <th>Student</th>
                   <th>Default fee</th>
                   <th>{selectedMonthLabel} payment</th>
+                  <th>Amount to charge</th>
                   <th>Comment</th>
                   <th>Refund</th>
                   <th>Status / alerts</th>
@@ -779,6 +790,7 @@ export default function FinancePage() {
                   const edit = snapshotEdits[row.id] || {};
                   const alertLabel = getBillingStopAlertLabel(row.billing_change_timing);
                   const studentName = [row.student_last_name, row.student_first_name].filter(Boolean).join(" ") || row.student_preferred_name;
+                  const collection = getMonthlyCollectionBreakdown(row, monthlyState.collectionCharges);
 
                   return (
                     <tr className={row.ricoCancellation ? "monthly-billing-rico-warning" : ""} key={row.id || `rico-${row.student_id}`}>
@@ -800,6 +812,27 @@ export default function FinancePage() {
                             value={edit.finalAmount ?? row.final_amount}
                           />
                         ) : formatBillingAmount(row.final_amount, row.currency)}
+                      </td>
+                      <td>
+                        {monthlyState.collectionError ? <span className="inline-alert">Amount unavailable</span> : (
+                          <>
+                            <strong>{formatBillingAmount(collection.amountToCharge, row.currency)}</strong>
+                            <details>
+                              <summary>Breakdown</summary>
+                              <div>Monthly tuition: {formatBillingAmount(collection.monthlyTuition, row.currency)}</div>
+                              {collection.additionalCharges.map((charge) => (
+                                <div key={charge.charge_id}>{charge.description}: {formatBillingAmount(charge.balance, row.currency)}</div>
+                              ))}
+                              <div>Additional charges: {formatBillingAmount(collection.additionalAmount, row.currency)}</div>
+                              <strong>Amount to charge: {formatBillingAmount(collection.amountToCharge, row.currency)}</strong>
+                            </details>
+                            {collection.legacyCharges.length ? (
+                              <div className="muted-text">
+                                {collection.legacyCharges.length} unclassified charge(s) excluded. Review in student billing.
+                              </div>
+                            ) : null}
+                          </>
+                        )}
                       </td>
                       <td>
                         {row.id ? (

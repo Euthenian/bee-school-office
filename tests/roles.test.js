@@ -742,7 +742,7 @@ test("student billing data helpers pin allocation relationships and use billing 
 
   for (const rpcName of [
     "get_student_billing_summary_mvp",
-    "create_student_charge_mvp",
+    "create_student_charge_for_collection_mvp",
     "record_student_payment_mvp",
     "allocate_student_payment_mvp",
     "record_student_refund_mvp"

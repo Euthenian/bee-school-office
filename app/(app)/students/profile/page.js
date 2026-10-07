@@ -22,6 +22,7 @@ import {
   getStudentInvitationRecipient
 } from "@/lib/ai-eigo-invitations";
 import {
+  canEditStudentCharge,
   formatBillingAmount,
   getChargeAllocatedTotal,
   getChargeBalance,
@@ -1102,6 +1103,7 @@ function BillingChargesTable({ charges }) {
             <th>Allocated</th>
             <th>Balance</th>
             <th>Status</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -1111,6 +1113,9 @@ function BillingChargesTable({ charges }) {
                 <div className="table-cell-stack">
                   <strong>{charge.description}</strong>
                   <span>{humanize(charge.charge_type)}</span>
+                  <span className="muted-text">
+                    {charge.collection_treatment === "additional" ? "Additional RICO charge" : charge.collection_treatment === "separate" ? "Separate from RICO" : "Unclassified legacy charge"}
+                  </span>
                 </div>
               </td>
               <td>{formatDate(charge.due_date)}</td>
@@ -1119,6 +1124,13 @@ function BillingChargesTable({ charges }) {
               <td>{formatBillingAmount(getChargeBalance(charge), charge.currency)}</td>
               <td>
                 <StatusBadge value={charge.status} />
+              </td>
+              <td>
+                {canEditStudentCharge(charge) ? (
+                  <Link className="secondary-button" href={`/billing/charges/edit/?studentId=${charge.student_id}&chargeId=${charge.id}`}>
+                    Edit
+                  </Link>
+                ) : null}
               </td>
             </tr>
           ))}

@@ -18,7 +18,7 @@ import {
   validateStudentRefundForm
 } from "@/lib/billing";
 
-export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submitting = false }) {
+export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submitting = false, mode = "create" }) {
   const [form, setForm] = useState(initialForm);
   const [localError, setLocalError] = useState("");
   const amountCanBeNegative = form.chargeType === "adjustment";
@@ -50,6 +50,15 @@ export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submittin
         </SurfaceHeader>
         <div className="form-grid">
           <label>
+            Charge treatment
+            <select onChange={(event) => updateField("collectionTreatment", event.target.value)} required value={form.collectionTreatment}>
+              {mode === "edit" && !form.collectionTreatment ? <option value="">Choose treatment</option> : null}
+              <option value="separate">Separate charge (not added to RICO collection)</option>
+              <option value="additional">Additional charge (add remaining balance to RICO collection)</option>
+            </select>
+            <span className="muted-text">Monthly tuition already comes from the billing snapshot. Choose Additional only for an amount to collect on top of it.</span>
+          </label>
+          <label>
             Charge type
             <select onChange={(event) => updateField("chargeType", event.target.value)} required value={form.chargeType}>
               {studentChargeTypes.map((type) => (
@@ -75,15 +84,19 @@ export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submittin
               value={form.amount}
             />
           </label>
-          <label>
-            Currency
-            <input
-              maxLength="3"
-              onChange={(event) => updateField("currency", event.target.value.toUpperCase())}
-              required
-              value={form.currency}
-            />
-          </label>
+          {mode === "edit" ? (
+            <div>Currency: {form.currency} (fixed for this charge)</div>
+          ) : (
+            <label>
+              Currency
+              <input
+                maxLength="3"
+                onChange={(event) => updateField("currency", event.target.value.toUpperCase())}
+                required
+                value={form.currency}
+              />
+            </label>
+          )}
           <label>
             Billing period start
             <input onChange={(event) => updateField("billingPeriodStart", event.target.value)} type="date" value={form.billingPeriodStart} />
@@ -96,24 +109,28 @@ export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submittin
             Due date
             <input onChange={(event) => updateField("dueDate", event.target.value)} type="date" value={form.dueDate} />
           </label>
-          <label>
-            Status
-            <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
-              {studentChargeStatuses.map((status) => (
-                <option key={status.value} value={status.value}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Source type
-            <input onChange={(event) => updateField("sourceType", event.target.value)} value={form.sourceType} />
-          </label>
-          <label>
-            Source ID
-            <input onChange={(event) => updateField("sourceId", event.target.value)} value={form.sourceId} />
-          </label>
+          {mode === "create" ? (
+            <>
+              <label>
+                Status
+                <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
+                  {studentChargeStatuses.map((status) => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Source type
+                <input onChange={(event) => updateField("sourceType", event.target.value)} value={form.sourceType} />
+              </label>
+              <label>
+                Source ID
+                <input onChange={(event) => updateField("sourceId", event.target.value)} value={form.sourceId} />
+              </label>
+            </>
+          ) : null}
         </div>
         <div className="form-grid single-column">
           <label>
@@ -128,7 +145,7 @@ export function StudentChargeForm({ cancelHref, initialForm, onSubmit, submittin
           Cancel
         </Link>
         <button className="primary-button" disabled={submitting} type="submit">
-          {submitting ? "Saving..." : "Add charge"}
+          {submitting ? "Saving..." : mode === "edit" ? "Save changes" : "Add charge"}
         </button>
       </div>
     </form>

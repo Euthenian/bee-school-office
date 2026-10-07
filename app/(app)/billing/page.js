@@ -235,6 +235,9 @@ export default function BillingPage() {
                       <div className="table-cell-stack">
                         <strong>{charge.description}</strong>
                         <span>{humanize(charge.charge_type)}</span>
+                        <span className="muted-text">
+                          {charge.collection_treatment === "additional" ? "Additional RICO charge" : charge.collection_treatment === "separate" ? "Separate from RICO" : "Unclassified legacy charge"}
+                        </span>
                       </div>
                     </td>
                     <td>{formatDate(charge.due_date)}</td>

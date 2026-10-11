@@ -13,6 +13,7 @@ dist/
 .env
 .env*.local
 !.env.local.example
+/.codex-bridge-secret.env
 
 # Logs
 npm-debug.log*

@@ -4,6 +4,9 @@ verify_jwt = false
 [functions.internal-coaching-slots]
 verify_jwt = false
 
+[functions.monthly-calendar-reminder]
+verify_jwt = false
+
 # Each function validates its own distinct bearer proof before reading Bee data.
 [functions.coach-brief-ticket-issue]
 verify_jwt = false

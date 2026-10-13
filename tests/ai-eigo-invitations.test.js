@@ -210,7 +210,7 @@ test("communications worker prepares AI-EIGO invitation email just in time and u
       async enqueueDueNoShowFollowUps() {
         return [];
       },
-      async listPendingIntegrationActions() {
+      async claimPendingIntegrationActions() {
         return [
           {
             idempotency_key: "ai-eigo-invite-email",

@@ -309,7 +309,7 @@ test("communications worker processes Resend email and calendar actions idempote
       async enqueueDueNoShowFollowUps() {
         return [{ trial_lesson_id: "trial-1" }];
       },
-      async listPendingIntegrationActions() {
+      async claimPendingIntegrationActions() {
         return [
           {
             idempotency_key: "trial-1-email",
@@ -375,7 +375,7 @@ test("Bee School email requires the dedicated Bee School Resend key without fall
       async enqueueDueNoShowFollowUps() {
         return [];
       },
-      async listPendingIntegrationActions() {
+      async claimPendingIntegrationActions() {
         return [
           {
             idempotency_key: "bee-school-email",
@@ -391,6 +391,8 @@ test("Bee School email requires the dedicated Bee School Resend key without fall
       },
       async recordActionResult(row) {
         recordedResults.push(row);
+      },
+      async releaseClaim() {
       }
     },
     logger: quietLogger()
@@ -421,7 +423,7 @@ test("communications worker never sends outbound email through Gmail", async () 
       async enqueueDueNoShowFollowUps() {
         return [];
       },
-      async listPendingIntegrationActions() {
+      async claimPendingIntegrationActions() {
         return [
           {
             idempotency_key: "legacy-gmail-action",

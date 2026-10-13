@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CommunicationComposer } from "@/components/CommunicationComposer";
 import { CommunicationTemplateManager } from "@/components/CommunicationTemplateManager";
+import { AutomatedCommunications } from "@/components/AutomatedCommunications";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -111,6 +112,8 @@ function CommunicationsContent() {
       </DataSurface>
 
       <CommunicationTemplateManager canEdit={mayEditTemplates} session={session} />
+
+      <AutomatedCommunications profile={profile} session={session} />
 
       {composerOpen ? <CommunicationComposer context={{ studentId, studentTemplateMode: true }} onCancel={() => setComposerOpen(false)} onSent={() => {
         setComposerOpen(false);

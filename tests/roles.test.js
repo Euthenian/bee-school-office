@@ -86,13 +86,15 @@ import {
   canCreateStudents,
   canManageBilling,
   canManageClasses,
+  canManageCommunications,
   canManageExpenses,
   canManageFinance,
   canManagePayroll,
   canManageStaff,
   getHighestRole,
   getRoleSet,
-  getVisibleNavigation
+  getVisibleNavigation,
+  roles
 } from "../lib/roles.js";
 import {
   compensationTypes,
@@ -262,6 +264,15 @@ test("teacher navigation excludes administrative foundation pages", () => {
   }).map((item) => item.href);
 
   assert.deepEqual(navigation, ["/dashboard/", "/students/", "/trial-lessons/"]);
+});
+
+test("Communication Center navigation follows communications access", () => {
+  for (const role of roles) {
+    const profile = { school_memberships: [{ role }] };
+    const visible = getVisibleNavigation(profile).some((item) => item.href === "/communications/");
+    assert.equal(visible, canManageCommunications(profile), `unexpected navigation for ${role}`);
+  }
+  assert.equal(getVisibleNavigation(null).some((item) => item.href === "/communications/"), false);
 });
 
 test("teacher cannot create students through UI permissions", () => {

@@ -366,6 +366,19 @@ textarea:focus {
   text-decoration: none;
 }
 
+.nav-link-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nav-link-icon {
+  flex: 0 0 18px;
+  height: 18px;
+  width: 18px;
+}
+
 .nav-count-badge {
   align-items: center;
   background: #d92d20;

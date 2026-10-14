@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { CoachBriefSessions } from "@/components/CoachBriefSessions";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -79,6 +80,8 @@ export default function DashboardPage() {
         <MetricCard label="Schools" loading={state.loading} value={state.metrics?.schools} />
         <MetricCard label="Staff" loading={state.loading} value={state.metrics?.staff} />
       </section>
+
+      <CoachBriefSessions />
 
       <DataSurface aria-labelledby="recent-students-heading">
         <SurfaceHeader

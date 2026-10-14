@@ -13,3 +13,6 @@ verify_jwt = false
 
 [functions.coach-brief-ticket-verify]
 verify_jwt = false
+
+[functions.coach-brief-sessions]
+verify_jwt = false

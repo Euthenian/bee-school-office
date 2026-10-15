@@ -96,10 +96,11 @@ test("student UI shows editable Last lesson date and Rico ID, while profile expo
   assert.match(studentProfilePage, /student\.legacy_customer_id/);
 });
 
-test("Finance Edit edits the shared Last lesson date through Billing end date and exposes Rico ID", () => {
+test("Finance Edit displays the authoritative Billing end date separately from Last lesson date", () => {
   const form = createStudentFinanceForm({ billing_end_date: "2026-09-30" }, {}, { last_lesson_date: "2026-10-31" });
 
-  assert.equal(form.billingEndDate, "2026-10-31");
+  assert.equal(form.billingEndDate, "2026-09-30");
+  assert.equal(createStudentFinanceForm({}, {}, { last_lesson_date: "2026-10-31" }).billingEndDate, "2026-10-31");
   assert.match(studentFinanceForm, /Billing end date/);
   assert.match(studentFinanceForm, /updateField\("billingEndDate"/);
   assert.match(studentFinanceForm, /type="date"[\s\S]*value=\{form\.billingEndDate\}/);

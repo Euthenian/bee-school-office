@@ -529,7 +529,7 @@ export default function StudentsPage() {
           onConfirm={handleBulkStatusConfirm}
           onStatusChange={setBulkStatusValue}
           status={bulkStatusValue}
-          statusOptions={studentStatuses}
+          statusOptions={studentStatuses.filter((status) => status.value !== "withdrawn")}
           submitting={bulkStatusSubmitting}
         />
       ) : null}

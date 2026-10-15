@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { fetchCommunicationTemplates, saveCommunicationTemplate } from "@/lib/data";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
-const variables = ["student_name", "student_email", "recipient_name", "school_name"];
+const standardVariables = ["student_name", "student_email", "recipient_name", "school_name"];
+const departureVariables = ["student_greeting_name", "departure_month", "last_billing_month"];
+const variables = [...standardVariables, ...departureVariables];
 const blank = { id: null, template_key: "", name: "", subject_template: "", body_template: "", variable_keys: [], status: "inactive" };
 
 export function CommunicationTemplateManager({ canEdit, session }) {
@@ -57,7 +59,7 @@ export function CommunicationTemplateManager({ canEdit, session }) {
         {templates.map((template) => (
           <div className="communication-template-row" key={template.id}>
             <div><strong>{template.name}</strong><span>{template.template_key} · {template.status}</span>
-              {!(template.variable_keys || []).every((key) => variables.includes(key)) ? <small>Uses trial variables outside the student email editor</small> : null}
+              {!(template.variable_keys || []).every((key) => variables.includes(key)) ? <small>Uses variables outside the student email editor</small> : null}
             </div>
             {canEdit && (template.variable_keys || []).every((key) => variables.includes(key)) ? <button className="secondary-button" onClick={() => setDraft({ ...template })} type="button">Edit</button> : null}
           </div>
@@ -72,7 +74,7 @@ export function CommunicationTemplateManager({ canEdit, session }) {
             <label><span>Subject</span><input onChange={(event) => setDraft({ ...draft, subject_template: event.target.value })} required value={draft.subject_template || ""} /></label>
             <label><span>Body</span><textarea onChange={(event) => setDraft({ ...draft, body_template: event.target.value })} required rows={8} value={draft.body_template || ""} /></label>
             <fieldset><legend>Allowed variables</legend>
-              {variables.map((variable) => (
+              {(draft.template_key === "student_departure_confirmation" ? variables : standardVariables).map((variable) => (
                 <label className="communication-variable-choice" key={variable}>
                   <input checked={draft.variable_keys.includes(variable)} onChange={(event) => setDraft({ ...draft, variable_keys: event.target.checked ? [...draft.variable_keys, variable] : draft.variable_keys.filter((key) => key !== variable) })} type="checkbox" />
                   <span>{`{{${variable}}}`}</span>

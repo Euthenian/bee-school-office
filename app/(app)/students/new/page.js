@@ -332,7 +332,7 @@ export default function NewStudentPage() {
             <label>
               Status
               <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
-                {studentStatuses.map((status) => (
+                {studentStatuses.filter((status) => status !== "withdrawn").map((status) => (
                   <option key={status} value={status}>
                     {status.replace("_", " ")}
                   </option>

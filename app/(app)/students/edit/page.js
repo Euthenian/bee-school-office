@@ -17,13 +17,17 @@ import {
   fetchSchoolTeachers,
   fetchSchools,
   fetchStudentBillingPlanOptions,
+  fetchStudentDepartureState,
   fetchStudentFinance,
   fetchStudentProfile,
+  confirmStudentDeparture,
+  voidStudentDepartureConfirmation,
   updateStudent
 } from "@/lib/data";
 import { formatEnrollment, formatPersonName, formatStudentAge } from "@/lib/format";
-import { canCreateStudents } from "@/lib/roles";
+import { canCreateStudents, canManageFinance } from "@/lib/roles";
 import { createEmptyStudentForm, createStudentEditState, studentStatuses, validateGuardianRows } from "@/lib/student-form";
+import { billingMonthFromDate, getTokyoDateKey, minimumBillingMonthFromNotice, validateDepartureConfirmation } from "@/lib/student-departure";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function EditStudentPage() {
@@ -40,6 +44,7 @@ function EditStudentContent() {
   const studentId = searchParams.get("id") || "";
   const { loading: authLoading, profile, session } = useAuth();
   const mayEdit = canCreateStudents(profile);
+  const mayManageFinance = canManageFinance(profile);
   const [form, setForm] = useState(() => createEmptyStudentForm());
   const [contacts, setContacts] = useState(() => createStudentEditState(null).contacts);
   const [guardians, setGuardians] = useState(() => createStudentEditState(null).guardians);
@@ -50,6 +55,12 @@ function EditStudentContent() {
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [student, setStudent] = useState(null);
+  const [departureState, setDepartureState] = useState(null);
+  const [departureForm, setDepartureForm] = useState(() => ({ noticeDate: getTokyoDateKey(), finalLessonDate: "", finalBillingMonth: "" }));
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [departureSubmitting, setDepartureSubmitting] = useState(false);
+  const [departureNotice, setDepartureNotice] = useState("");
+  const [departureError, setDepartureError] = useState("");
   const [loadingFoundation, setLoadingFoundation] = useState(true);
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
@@ -78,12 +89,16 @@ function EditStudentContent() {
       ]);
       if (!active) return;
 
-      const [financeResult, billingPlansResult] = studentResult.data
-        ? await Promise.all([fetchStudentFinance(supabase, studentId), fetchStudentBillingPlanOptions(supabase, studentId)])
-        : [{ data: null, error: null }, { data: [], error: null }];
+      const [financeResult, billingPlansResult, departureResult] = studentResult.data
+        ? await Promise.all([
+            fetchStudentFinance(supabase, studentId),
+            fetchStudentBillingPlanOptions(supabase, studentId),
+            fetchStudentDepartureState(supabase, studentId)
+          ])
+        : [{ data: null, error: null }, { data: [], error: null }, { data: null, error: null }];
       if (!active) return;
 
-      const loadError = [studentResult.error, schoolsResult.error, levelsResult.error, financeResult.error, billingPlansResult.error]
+      const loadError = [studentResult.error, schoolsResult.error, levelsResult.error, financeResult.error, billingPlansResult.error, departureResult.error]
         .filter(Boolean)
         .map((item) => item.message)
         .join(" ");
@@ -97,6 +112,12 @@ function EditStudentContent() {
       } else {
         const editState = createStudentEditState(studentResult.data, financeResult.data);
         setStudent(studentResult.data);
+        setDepartureState(departureResult.data);
+        setDepartureForm({
+          noticeDate: getTokyoDateKey(),
+          finalLessonDate: departureResult.data?.last_lesson_date || "",
+          finalBillingMonth: billingMonthFromDate(departureResult.data?.billing_end_date)
+        });
         setForm(editState.form);
         setContacts(editState.contacts);
         setGuardians(editState.guardians);
@@ -207,6 +228,11 @@ function EditStudentContent() {
       age_override: form.ageOverride === "" ? null : Number(form.ageOverride)
     });
   }, [form.ageOverride, form.dateOfBirth]);
+  const departureValidationError = validateDepartureConfirmation({
+    ...departureForm,
+    billingProfileId: departureState?.billing_profile_id,
+    billingStartDate: departureState?.billing_start_date
+  });
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -286,6 +312,75 @@ function EditStudentContent() {
     }
 
     router.push(`/students/profile/?id=${studentId}`);
+  }
+
+  async function handleConfirmDeparture(event) {
+    event.preventDefault();
+    setError("");
+    setDepartureNotice("");
+    setDepartureError("");
+    const validationError = validateDepartureConfirmation({
+      ...departureForm,
+      billingProfileId: departureState?.billing_profile_id,
+      billingStartDate: departureState?.billing_start_date
+    });
+    if (validationError) {
+      setDepartureError(validationError);
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setDepartureError("You must be signed in to confirm a departure.");
+      return;
+    }
+    setDepartureSubmitting(true);
+    const { error: confirmError } = await confirmStudentDeparture(supabase, {
+      studentId,
+      ...departureForm,
+      billingProfileId: departureState.billing_profile_id
+    });
+    if (confirmError) {
+      setDepartureError(confirmError.message);
+    } else {
+      const { data, error: refreshError } = await fetchStudentDepartureState(supabase, studentId);
+      if (refreshError) setDepartureError(refreshError.message);
+      else {
+        setDepartureState(data);
+        setForm((current) => ({ ...current, status: "withdrawn", lastLessonDate: data.last_lesson_date || "" }));
+        setDepartureNotice("Departure confirmed. Check Communication history for the automatic email status.");
+      }
+    }
+    setDepartureSubmitting(false);
+  }
+
+  async function handleVoidDeparture(event) {
+    event.preventDefault();
+    setError("");
+    setDepartureNotice("");
+    if (!correctionReason.trim()) {
+      setError("Enter a reason for correcting this confirmation.");
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setError("You must be signed in to correct a departure.");
+      return;
+    }
+    setDepartureSubmitting(true);
+    const { error: voidError } = await voidStudentDepartureConfirmation(supabase, studentId, correctionReason);
+    if (voidError) {
+      setError(voidError.message);
+    } else {
+      const { data, error: refreshError } = await fetchStudentDepartureState(supabase, studentId);
+      if (refreshError) setError(refreshError.message);
+      else {
+        setDepartureState(data);
+        setForm((current) => ({ ...current, status: data.student_status }));
+        setCorrectionReason("");
+        setDepartureNotice("Confirmation voided and retained in history. Review Communication history for a sent departure email before confirming again; a correction may need a staff follow-up.");
+      }
+    }
+    setDepartureSubmitting(false);
   }
 
   if (!studentId && !loadingFoundation) {
@@ -376,8 +471,8 @@ function EditStudentContent() {
             </label>
             <label>
               Status
-              <select onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
-                {studentStatuses.map((status) => (
+              <select disabled={Boolean(departureState?.active_confirmation_id)} onChange={(event) => updateField("status", event.target.value)} required value={form.status}>
+                {studentStatuses.filter((status) => status !== "withdrawn" || form.status === "withdrawn").map((status) => (
                   <option key={status} value={status}>
                     {status.replace("_", " ")}
                   </option>
@@ -430,7 +525,7 @@ function EditStudentContent() {
             </label>
             <label>
               Last lesson date
-              <input onChange={(event) => updateField("lastLessonDate", event.target.value)} type="date" value={form.lastLessonDate} />
+              <input disabled={Boolean(departureState?.active_confirmation_id)} onChange={(event) => updateField("lastLessonDate", event.target.value)} type="date" value={form.lastLessonDate} />
             </label>
           </div>
         </DataSurface>
@@ -492,6 +587,89 @@ function EditStudentContent() {
           </button>
         </div>
       </form>
+
+      <DataSurface className="departure-confirmation-surface">
+        <SurfaceHeader>
+          <h2>Departure confirmation</h2>
+        </SurfaceHeader>
+        <div className="departure-confirmation-content">
+          {departureNotice ? <p className="inline-success">{departureNotice}</p> : null}
+          {departureError ? <p className="inline-alert" role="alert">{departureError}</p> : null}
+          <p>Confirm the final lesson date and final billing month after reviewing the student and billing records. This action updates the dates and student status together. Save other edits separately.</p>
+          <div className="setup-notice" role="note">
+            <p>
+              RICO cancellation remains a separate verification step. {mayManageFinance ? (
+                <>Check the existing warning in <Link href="/finance/?filter=rico-cancellation#monthly-billing">Finance</Link>.</>
+              ) : (
+                "Ask a Finance administrator to check the existing RICO cancellation warning."
+              )}
+            </p>
+          </div>
+          {departureState?.active_confirmation_id ? (
+            <form className="student-form departure-confirmation-form" onSubmit={handleVoidDeparture}>
+              <p>Confirmed on {departureState.confirmed_at?.slice(0, 10)}. Event ID: {departureState.active_confirmation_id}</p>
+              <p>Notice date: {departureState.confirmed_notice_date || "Not recorded for this earlier confirmation"}</p>
+              <p>Final lesson: {departureState.confirmed_final_lesson_date}; final billing month: {billingMonthFromDate(departureState.confirmed_final_billing_month)}</p>
+              <label>
+                Correction reason
+                <input onChange={(event) => setCorrectionReason(event.target.value)} required value={correctionReason} />
+              </label>
+              <div className="form-actions departure-confirmation-actions">
+                <button className="secondary-button" disabled={departureSubmitting} type="submit">
+                  {departureSubmitting ? "Saving..." : "Void confirmation for correction"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form className="student-form departure-confirmation-form" noValidate onSubmit={handleConfirmDeparture}>
+              <label>
+                Departure notice date
+                <input
+                  onChange={(event) => setDepartureForm((current) => ({ ...current, noticeDate: event.target.value }))}
+                  required
+                  type="date"
+                  value={departureForm.noticeDate}
+                />
+                <small className="departure-confirmation-hint">Use the date the student actually gave notice; today is prefilled.</small>
+              </label>
+              <p>Notice by the 15th allows the current month as the final billing month. Later notice requires at least the following month.</p>
+              {minimumBillingMonthFromNotice(departureForm.noticeDate) ? (
+                <p>Earliest required billing month from this notice date: {minimumBillingMonthFromNotice(departureForm.noticeDate)}</p>
+              ) : null}
+              <div className="form-grid nested-form-grid">
+                <label>
+                  Final lesson date
+                  <input onChange={(event) => setDepartureForm((current) => ({ ...current, finalLessonDate: event.target.value }))} required type="date" value={departureForm.finalLessonDate} />
+                </label>
+                <label>
+                  Final billing month
+                  <input
+                    aria-describedby="departure-billing-month-format"
+                    aria-invalid={Boolean(departureError && /billing month/i.test(departureError))}
+                    onChange={(event) => {
+                      setDepartureError("");
+                      setDepartureForm((current) => ({ ...current, finalBillingMonth: event.target.value }));
+                    }}
+                    placeholder="YYYY-MM"
+                    required
+                    type="month"
+                    value={departureForm.finalBillingMonth}
+                  />
+                  <small className="departure-confirmation-hint" id="departure-billing-month-format">Format: YYYY-MM (e.g. 2026-11)</small>
+                </label>
+              </div>
+              {!departureState?.billing_profile_id ? <p className="inline-alert">A valid billing profile is required. Complete Student Finance first.</p> : null}
+              {departureState?.billing_profile_id && departureValidationError ? <p className="inline-alert" role="alert">{departureValidationError}</p> : null}
+              <p>The billing end date will be the last day of the confirmed final billing month. Any prior RICO cancellation verification is cleared if that date changes.</p>
+              <div className="form-actions departure-confirmation-actions">
+                <button className="primary-button" disabled={departureSubmitting || Boolean(departureValidationError) || departureState?.student_status === "withdrawn"} type="submit">
+                  {departureSubmitting ? "Confirming..." : "Confirm Departure"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </DataSurface>
     </>
   );
 }

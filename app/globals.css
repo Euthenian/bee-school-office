@@ -534,6 +534,37 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+.departure-confirmation-surface {
+  padding: 24px;
+}
+
+.departure-confirmation-surface > .surface-header {
+  padding: 0 0 18px;
+}
+
+.departure-confirmation-content {
+  display: grid;
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.departure-confirmation-content > p,
+.departure-confirmation-form > p {
+  margin: 0;
+}
+
+.departure-confirmation-hint {
+  color: var(--muted);
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.departure-confirmation-actions {
+  margin-top: 8px;
+}
+
 .upcoming-trial-lesson-indicator {
   align-items: center;
   display: inline-flex;

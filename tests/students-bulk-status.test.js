@@ -25,6 +25,14 @@ test("student bulk status supports only existing student statuses", () => {
   assert.deepEqual(studentStatusValues, ["active", "pending", "paused", "withdrawn", "graduated", "inactive"]);
 });
 
+test("bulk withdrawn status is rejected before any database call", async () => {
+  const supabase = createBulkStatusSupabase();
+  const result = await bulkUpdateStudentStatus(supabase, { status: "withdrawn", studentIds: [firstStudentId] }, adminProfile);
+  assert.match(result.error.message, /Confirm Departure/);
+  assert.deepEqual(supabase.calls, []);
+  assert.match(studentsPage, /statusOptions=\{studentStatuses\.filter\(\(status\) => status\.value !== "withdrawn"\)\}/);
+});
+
 test("non-admin bulk status data-layer invocation is rejected before Supabase mutation", async () => {
   const supabase = createBulkStatusSupabase();
 

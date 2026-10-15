@@ -27,6 +27,7 @@ export function StudentTemplateComposer({ studentId, onCancel, onSent }) {
       if (!active) return;
       const selectable = (data || []).filter((template) =>
         template.status === "active" &&
+        template.template_key !== "student_departure_confirmation" &&
         (template.variable_keys || []).every((key) => supportedVariables.has(key))
       );
       setTemplates(selectable);

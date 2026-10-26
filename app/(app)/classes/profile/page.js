@@ -4,18 +4,18 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ClassDeleteDialog } from "@/components/ClassDeleteDialog";
+import { ClassAddStudentDialog } from "@/components/ClassAddStudentDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { formatLessonDay, formatLessonTime, formatTeacherName } from "@/lib/class-details";
+import { selectClassEmailTemplates, summarizeClassEmailRecipients } from "@/lib/class-mail";
 import { formatClassName } from "@/lib/classes";
-import { getDefaultStudentEmail } from "@/lib/communication-templates";
-import { bulkQueueClassStudentEmails, deleteClass, fetchClassProfile, updateClass } from "@/lib/data";
+import { bulkQueueClassStudentEmails, deleteClass, fetchClassProfile, fetchCommunicationTemplates, previewClassTemplateEmail, sendClassTemplateEmail, updateClass } from "@/lib/data";
 import { formatDate, formatPersonName } from "@/lib/format";
 import { canManageClasses, canManageCommunications } from "@/lib/roles";
-import { isValidStudentEmail } from "@/lib/students";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function ClassProfilePage() {
@@ -37,10 +37,8 @@ function ClassProfileContent() {
   const [deleteError, setDeleteError] = useState("");
   const [deactivating, setDeactivating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [addStudentOpen, setAddStudentOpen] = useState(false);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
-  const [mailError, setMailError] = useState("");
-  const [mailForm, setMailForm] = useState({ body: "", subject: "" });
-  const [mailSubmitting, setMailSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -109,9 +107,10 @@ function ClassProfileContent() {
   const classRow = state.classRow;
   const enrollments = classRow.student_enrollments || [];
   const activeEnrollments = enrollments.filter((enrollment) => enrollment.status === "active");
-  const activeStudents = activeEnrollments.map((enrollment) => enrollment.students).filter(Boolean);
-  const emailRecipientCount = activeStudents.filter((student) => isValidStudentEmail(getDefaultStudentEmail(student))).length;
-  const noEmailCount = activeStudents.length - emailRecipientCount;
+  const activeStudents = [...new Map(activeEnrollments.map((row) => row.students).filter(Boolean)
+    .map((student) => [student.id, student])).values()];
+  const { recipientCount: emailRecipientCount, missingCount: noEmailCount,
+    duplicateCount: duplicateEmailCount } = summarizeClassEmailRecipients(activeStudents);
 
   function handleDeleteRequest() {
     setDeleteError("");
@@ -119,55 +118,31 @@ function ClassProfileContent() {
   }
 
   function handleEmailStudentsOpen() {
-    setMailError("");
     setMailDialogOpen(true);
   }
 
   function handleEmailStudentsCancel() {
-    if (mailSubmitting) return;
-    setMailError("");
     setMailDialogOpen(false);
   }
 
-  function updateMailField(field, value) {
-    setMailForm((current) => ({ ...current, [field]: value }));
-  }
-
-  async function handleEmailStudentsSubmit(event) {
-    event.preventDefault();
-
+  async function handleStudentAdded() {
     const supabase = getSupabaseBrowserClient();
-    if (!supabase || !session) {
-      setMailError("You must be signed in to send class email.");
-      return;
-    }
+    if (!supabase) return "You must be signed in to refresh the class.";
+    const { data, error } = await fetchClassProfile(supabase, classRow.id);
+    if (error || !data) return error?.message || "Class could not be reloaded.";
+    setState((current) => ({ ...current, classRow: data }));
+    setAddStudentOpen(false);
+    setNotice("Student added to the class.");
+    return "";
+  }
 
-    setMailSubmitting(true);
-    setMailError("");
-    setNotice("");
-
-    const { data, error } = await bulkQueueClassStudentEmails(
-      supabase,
-      {
-        body: mailForm.body,
-        classId: classRow.id,
-        subject: mailForm.subject
-      },
-      profile
-    );
-
-    if (error) {
-      setMailError(error.message);
-      setMailSubmitting(false);
-      return;
-    }
-
+  function handleEmailQueued(data) {
     setMailDialogOpen(false);
-    setMailSubmitting(false);
-    setMailForm({ body: "", subject: "" });
-    setNotice(
-      `${data.queued} email${data.queued === 1 ? "" : "s"} queued.${data.skipped ? ` ${data.skipped} student${data.skipped === 1 ? "" : "s"} skipped because no email address is available.` : ""}`
-    );
+    const missing = data.skipped_missing ?? data.skipped ?? 0;
+    const duplicate = data.skipped_duplicate ?? data.skippedDuplicate ?? 0;
+    setNotice(`${data.queued} email${data.queued === 1 ? "" : "s"} queued.`
+      + (missing ? ` ${missing} skipped without a valid email.` : "")
+      + (duplicate ? ` ${duplicate} skipped because the address was already included.` : ""));
   }
 
   function handleDeleteCancel() {
@@ -231,7 +206,7 @@ function ClassProfileContent() {
             {mayCommunicate ? (
               <button
                 className="secondary-button"
-                disabled={!activeStudents.length || !emailRecipientCount}
+                disabled={!activeStudents.length}
                 onClick={handleEmailStudentsOpen}
                 type="button"
               >
@@ -270,18 +245,18 @@ function ClassProfileContent() {
       {mailDialogOpen ? (
         <ClassBulkMailDialog
           activeStudentCount={activeStudents.length}
-          body={mailForm.body}
-          error={mailError}
+          classId={classRow.id}
+          duplicateEmailCount={duplicateEmailCount}
           noEmailCount={noEmailCount}
-          onBodyChange={(value) => updateMailField("body", value)}
           onCancel={handleEmailStudentsCancel}
-          onSubmit={handleEmailStudentsSubmit}
-          onSubjectChange={(value) => updateMailField("subject", value)}
+          onQueued={handleEmailQueued}
+          profile={profile}
           recipientCount={emailRecipientCount}
-          subject={mailForm.subject}
-          submitting={mailSubmitting}
+          session={session}
         />
       ) : null}
+
+      {addStudentOpen ? <ClassAddStudentDialog classRow={classRow} onAdded={handleStudentAdded} onCancel={() => setAddStudentOpen(false)} /> : null}
 
       <DataSurface>
         <SurfaceHeader>
@@ -308,7 +283,7 @@ function ClassProfileContent() {
       </DataSurface>
 
       <DataSurface>
-        <SurfaceHeader>
+        <SurfaceHeader actions={classRow.status === "active" ? <button className="secondary-button" onClick={() => setAddStudentOpen(true)} type="button">Add Student</button> : null}>
           <h2>Students</h2>
         </SurfaceHeader>
         {enrollments.length ? (
@@ -366,17 +341,88 @@ function buildInactiveClassInput(classRow) {
 
 function ClassBulkMailDialog({
   activeStudentCount,
-  body,
-  error,
+  classId,
+  duplicateEmailCount,
   noEmailCount,
-  onBodyChange,
   onCancel,
-  onSubmit,
-  onSubjectChange,
+  onQueued,
+  profile,
   recipientCount,
-  subject,
-  submitting
+  session
 }) {
+  const [templates, setTemplates] = useState([]);
+  const [templateKey, setTemplateKey] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const selectedTemplate = templates.find((template) => template.template_key === templateKey);
+  const shownSubject = selectedTemplate ? selectedTemplate.subject_template : subject;
+  const shownBody = selectedTemplate ? selectedTemplate.body_template : body;
+
+  useEffect(() => {
+    let active = true;
+    async function loadTemplates() {
+      if (!session) {
+        setError("You must be signed in to send class email.");
+        setLoading(false);
+        return;
+      }
+      const { data, error: loadError } = await fetchCommunicationTemplates(getSupabaseBrowserClient());
+      if (!active) return;
+      setTemplates(selectClassEmailTemplates(data || []));
+      setError(loadError?.message || "");
+      setLoading(false);
+    }
+    loadTemplates();
+    return () => { active = false; };
+  }, [session]);
+
+  async function handlePreview(event) {
+    event.preventDefault();
+    setError("");
+    setPreview(null);
+    if (!templateKey) {
+      if (!subject.trim() || !body.trim()) {
+        setError("Subject and message body are required.");
+        return;
+      }
+      if (/\{\{|\}\}/.test(subject + body)) {
+        setError("General message contains an unresolved template variable.");
+        return;
+      }
+      setPreview({ recipient_count: recipientCount, selected: activeStudentCount,
+        skipped_missing: noEmailCount, skipped_duplicate: duplicateEmailCount,
+        representative: { subject: subject.trim(), body: body.trim() } });
+      return;
+    }
+    setLoading(true);
+    const { data, error: previewError } = await previewClassTemplateEmail(
+      getSupabaseBrowserClient(), classId, templateKey
+    );
+    setLoading(false);
+    if (previewError) setError(previewError.message);
+    else setPreview(data);
+  }
+
+  async function handleSend() {
+    if (!preview?.recipient_count || submitting) return;
+    setSubmitting(true);
+    setError("");
+    const { data, error: sendError } = templateKey
+      ? await sendClassTemplateEmail(getSupabaseBrowserClient(), classId, templateKey)
+      : await bulkQueueClassStudentEmails(getSupabaseBrowserClient(), { classId, subject, body }, profile);
+    if (sendError) {
+      setError(sendError.message);
+      setPreview(null);
+      setSubmitting(false);
+      return;
+    }
+    onQueued(data);
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section aria-labelledby="class-bulk-mail-title" aria-modal="true" className="communication-modal" role="dialog">
@@ -389,35 +435,59 @@ function ClassBulkMailDialog({
             Cancel
           </button>
         </header>
-        <form className="student-form" onSubmit={onSubmit}>
+        <form className="student-form" onSubmit={handlePreview}>
           <div className="confirmation-modal-body">
             <p>
               {activeStudentCount} active student{activeStudentCount === 1 ? "" : "s"} /{" "}
               {recipientCount} email recipient{recipientCount === 1 ? "" : "s"}
               {noEmailCount ? ` / ${noEmailCount} without email` : ""}
+              {duplicateEmailCount ? ` / ${duplicateEmailCount} duplicate addresses` : ""}
             </p>
-            {error ? <p className="inline-alert">{error}</p> : null}
+            {error ? <p className="inline-alert" role="alert">{error}</p> : null}
+            <label className="form-field"><span>Template</span>
+              <select disabled={loading || submitting} onChange={(event) => {
+                setTemplateKey(event.target.value);
+                setPreview(null);
+              }} value={templateKey}>
+                <option value="">General message (write your own)</option>
+                {templates.map((template) => <option key={template.id} value={template.template_key}>
+                  {template.name}{template.template_key === "general_message" ? " (template)" : ""}
+                </option>)}
+              </select>
+            </label>
             <label className="form-field">
               <span>Subject</span>
               <input
-                disabled={submitting}
-                onChange={(event) => onSubjectChange(event.target.value)}
+                disabled={submitting || loading}
+                onChange={(event) => { setSubject(event.target.value); setPreview(null); }}
+                readOnly={Boolean(templateKey)}
                 required
                 type="text"
-                value={subject}
+                value={shownSubject || ""}
               />
             </label>
             <label className="form-field">
               <span>Message body</span>
-              <textarea disabled={submitting} onChange={(event) => onBodyChange(event.target.value)} required value={body} />
+              <textarea disabled={submitting || loading} onChange={(event) => { setBody(event.target.value); setPreview(null); }} readOnly={Boolean(templateKey)} required value={shownBody || ""} />
             </label>
           </div>
+          {preview ? <div aria-label="Class email preview" className="communication-preview">
+            <p><strong>{preview.recipient_count}</strong> recipient{preview.recipient_count === 1 ? "" : "s"} selected for individual email.</p>
+            {preview.skipped_missing ? <p>{preview.skipped_missing} skipped without a valid email.</p> : null}
+            {preview.skipped_duplicate ? <p>{preview.skipped_duplicate} skipped because an address is already included.</p> : null}
+            {preview.representative ? <>
+              <p><strong>Representative subject:</strong> {preview.representative.subject}</p>
+              <p><strong>Representative message:</strong></p>
+              <pre className="communication-preview-body">{preview.representative.body}</pre>
+            </> : <p>No eligible email recipients.</p>}
+          </div> : null}
           <div className="form-actions confirmation-modal-actions">
             <button className="secondary-button" disabled={submitting} onClick={onCancel} type="button">
               Cancel
             </button>
-            <button className="primary-button" disabled={submitting || !recipientCount} type="submit">
-              {submitting ? "Queuing..." : `Queue ${recipientCount} email${recipientCount === 1 ? "" : "s"}`}
+            <button className="secondary-button" disabled={submitting || loading} type="submit">{loading ? "Loading..." : "Preview"}</button>
+            <button className="primary-button" disabled={submitting || loading || !preview?.recipient_count} onClick={handleSend} type="button">
+              {submitting ? "Queuing..." : "Send"}
             </button>
           </div>
         </form>

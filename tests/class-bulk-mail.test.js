@@ -17,8 +17,7 @@ test("class profile bulk mail UI targets active enrollments and uses communicati
   assert.match(classProfilePage, /enrollments\.filter\(\(enrollment\) => enrollment\.status === "active"\)/);
   assert.match(classProfilePage, /Email Students/);
   assert.match(classProfilePage, /bulkQueueClassStudentEmails/);
-  assert.match(classProfilePage, /getDefaultStudentEmail\(student\)/);
-  assert.match(classProfilePage, /isValidStudentEmail\(getDefaultStudentEmail\(student\)\)/);
+  assert.match(classProfilePage, /summarizeClassEmailRecipients\(activeStudents\)/);
   assert.doesNotMatch(classProfilePage, /bcc|cc:/i);
 });
 
@@ -94,6 +93,20 @@ test("class bulk mail queues one communication per valid active recipient and sk
   assert.equal(queueCalls[0].args.p_communication_type, "custom");
   assert.equal("bcc" in queueCalls[0].args, false);
   assert.equal("cc" in queueCalls[0].args, false);
+});
+
+test("class bulk mail sends one message to a shared recipient", async () => {
+  const supabase = createBulkMailSupabase({
+    classRow: classProfile([activeStudentId, activeNoEmailStudentId]),
+    students: [student(activeStudentId, "guardian@example.com"), student(activeNoEmailStudentId, "GUARDIAN@example.com")]
+  });
+  const result = await bulkQueueClassStudentEmails(
+    supabase, { body: "Class update", classId, subject: "Notice" }, adminProfile
+  );
+  assert.equal(result.error, null);
+  assert.deepEqual({ queued: result.data.queued, skippedDuplicate: result.data.skippedDuplicate },
+    { queued: 1, skippedDuplicate: 1 });
+  assert.equal(supabase.calls.filter((call) => call.name === "queue_communication_mvp").length, 1);
 });
 
 test("class bulk mail preserves authorization and requires active recipients", async () => {

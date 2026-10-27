@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { ActionIcon } from "@/components/ActionIcon";
 import { SetupNotice } from "@/components/SetupNotice";
+import { SidebarDecoration } from "@/components/SidebarDecoration";
 import { useAuth } from "@/components/AuthProvider";
 import {
   fetchFinancialDocumentBadgeCount,
@@ -28,6 +31,27 @@ import {
 import { officeTodosUpdatedEvent } from "@/lib/office-todos";
 import { studentQuestionsUpdatedEvent } from "@/lib/student-questions";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { studentSearchChangedEvent, studentSearchRequestedEvent } from "@/lib/students";
+
+const navigationIcons = {
+  "/dashboard/": "grid",
+  "/students/": "users",
+  "/questions/": "help",
+  "/trial-lessons/": "calendar",
+  "/schools/": "school",
+  "/staff/": "users",
+  "/teachers/": "users",
+  "/classes/": "book",
+  "/communications/": "mail",
+  "/finance/": "money",
+  "/payroll/": "money",
+  "/billing/": "document",
+  "/expenses/": "money",
+  "/expenses/financial-docs/": "document",
+  "/todo/": "check-list",
+  "/users/": "users",
+  "/settings/": "settings"
+};
 
 export function AdminShell({ children }) {
   const pathname = usePathname();
@@ -41,12 +65,14 @@ export function AdminShell({ children }) {
   const mayManageStudentQuestions = canManageStudentQuestions(profile);
   const mayManageTrialLessons = canManageTrialLessons(profile);
   const isTrialLessonsListPage = pathname === "/trial-lessons" || pathname === "/trial-lessons/";
+  const isStudentsListPage = pathname === "/students" || pathname === "/students/";
   const [pendingTrialBookingCount, setPendingTrialBookingCount] = useState(0);
   const [financialDocumentCount, setFinancialDocumentCount] = useState(0);
   const [officeTodoCount, setOfficeTodoCount] = useState(0);
   const [studentQuestionCount, setStudentQuestionCount] = useState(0);
   const [ricoCancellationCount, setRicoCancellationCount] = useState(0);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [headerSearch, setHeaderSearch] = useState("");
 
   useEffect(() => {
     if (!loading && configured && !session) {
@@ -149,6 +175,19 @@ export function AdminShell({ children }) {
     };
   }, [mobileNavigationOpen]);
 
+  useEffect(() => {
+    function handleStudentSearchChanged(event) {
+      setHeaderSearch(event.detail || "");
+    }
+    window.addEventListener(studentSearchChangedEvent, handleStudentSearchChanged);
+    return () => window.removeEventListener(studentSearchChangedEvent, handleStudentSearchChanged);
+  }, []);
+
+  function handleHeaderSearch(value) {
+    setHeaderSearch(value);
+    window.dispatchEvent(new CustomEvent(studentSearchRequestedEvent, { detail: value }));
+  }
+
   async function handleSignOut() {
     await signOut();
     router.replace("/login/");
@@ -186,24 +225,10 @@ export function AdminShell({ children }) {
           }}
         >
           <span className="nav-link-label">
-            {item.icon === "mail" ? (
-              <svg
-                aria-hidden="true"
-                className="nav-link-icon"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-              >
-                <rect x="3" y="5" width="18" height="14" rx="2" />
-                <path d="m3 7 9 6 9-6" />
-              </svg>
-            ) : null}
+            <ActionIcon className="nav-link-icon" name={navigationIcons[item.href]} />
             <span>{item.label}</span>
           </span>
-          {badgeValue ? <span className="nav-count-badge">{badgeValue}</span> : null}
+          {badgeValue ? <span className={`nav-count-badge ${item.href === "/questions/" ? "danger" : "warning"}`}>{badgeValue}</span> : null}
         </Link>
       );
     });
@@ -231,9 +256,7 @@ export function AdminShell({ children }) {
     <div className={`app-shell ${mobileNavigationOpen ? "mobile-nav-open" : ""}`}>
       <header className="mobile-shell-header">
         <Link className="brand-stack" href="/dashboard/">
-          <div className="brand-mark" aria-hidden="true">
-            B
-          </div>
+          <Image className="brand-logo" src="/images/bee-classic-logo.png" alt="" width={52} height={41} />
           <div>
             <p className="eyebrow">Bee School</p>
             <h1>Office</h1>
@@ -264,9 +287,7 @@ export function AdminShell({ children }) {
 
       <aside className="sidebar" id="mobile-navigation-drawer">
         <Link className="brand-stack" href="/dashboard/">
-          <div className="brand-mark" aria-hidden="true">
-            B
-          </div>
+          <Image className="brand-logo" src="/images/bee-classic-logo.png" alt="" width={52} height={41} />
           <div>
             <p className="eyebrow">Bee School</p>
             <h1>Office</h1>
@@ -277,11 +298,6 @@ export function AdminShell({ children }) {
           {renderNavigationLinks({ onNavigate: () => setMobileNavigationOpen(false) })}
         </nav>
 
-        <div className="sidebar-footer">
-          <strong>{profile?.full_name || session.user.email || "Signed in"}</strong>
-          <span>{highestRole ? roleLabels[highestRole] : "No role assigned"}</span>
-        </div>
-
         <div className="mobile-drawer-footer">
           <strong>{profile?.full_name || "Signed in"}</strong>
           <span>{session.user.email}</span>
@@ -290,20 +306,27 @@ export function AdminShell({ children }) {
             Log out
           </button>
         </div>
+        <SidebarDecoration />
       </aside>
 
       <main className="app-main">
         <header className="topbar">
+          {isStudentsListPage ? (
+            <label className="topbar-search">
+              <ActionIcon name="search" />
+              <span className="sr-only">Search students</span>
+              <input onChange={(event) => handleHeaderSearch(event.target.value)} placeholder="Search students..." type="search" value={headerSearch} />
+            </label>
+          ) : <span className="topbar-spacer" />}
           {profileError ? <span className="inline-alert">{profileError}</span> : null}
+          <div className="user-avatar" aria-hidden="true">{(profile?.full_name || session.user.email || "U").trim()[0].toUpperCase()}</div>
           <div className="user-chip">
             <strong>{profile?.full_name || session.user.email}</strong>
             <span>{highestRole ? roleLabels[highestRole] : "Awaiting role"}</span>
           </div>
-          <button className="ghost-button" onClick={handleSignOut} type="button">
-            Log out
-          </button>
+          <button className="ghost-button topbar-logout" onClick={handleSignOut} type="button">Log out</button>
         </header>
-        <div className={isTrialLessonsListPage ? "content content-wide" : "content"}>{children}</div>
+        <div className={isTrialLessonsListPage || isStudentsListPage ? "content content-wide" : "content"}>{children}</div>
       </main>
     </div>
   );

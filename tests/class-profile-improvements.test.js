@@ -141,10 +141,10 @@ test("simultaneous classes are named and saved by their class teacher", async ()
   assert.equal(formatClassOption(teacherA), "Wednesday 18:00 (Teacher A) - Ohashi");
   assert.deepEqual(filterClasses([teacherA, teacherB], { search: "teacher a" }), [teacherA]);
 
-  // Until 20261028001000 is applied, classes has no staff teacher column to select.
+  // 20261028001000 adds the class teacher column these selects read.
   for (const select of [classSelect, classProfileSelect]) {
-    assert.doesNotMatch(select, /^\s{2}assigned_teacher_staff_id,/m);
-    assert.doesNotMatch(select, /classes_assigned_teacher_staff_id_organization_id_fkey/);
+    assert.match(select, /^\s{2}assigned_teacher_staff_id,/m);
+    assert.match(select, /assigned_teacher_staff:staff!classes_assigned_teacher_staff_id_organization_id_fkey/);
   }
 
   assert.equal(buildClassMutation({ assignedTeacherStaffId: "staff-a" }).assignedTeacherStaffId, "staff-a");
@@ -156,7 +156,8 @@ test("simultaneous classes are named and saved by their class teacher", async ()
   assert.equal(calls[0].name, "create_class_mvp");
   assert.equal(calls[0].args.p_assigned_teacher_staff_id, "staff-a");
   assert.equal(calls[1].name, "update_class_mvp");
-  assert.equal("p_assigned_teacher_staff_id" in calls[1].args, false);
+  // Clearing the teacher is sent explicitly so saving a class never keeps a stale one.
+  assert.equal(calls[1].args.p_assigned_teacher_staff_id, null);
 
   // Deactivating from the profile must keep the class teacher.
   assert.match(profilePage, /assignedTeacherStaffId: classRow\.assigned_teacher_staff_id/);

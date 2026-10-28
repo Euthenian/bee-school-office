@@ -2,10 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
+import { ActionIcon } from "@/components/ActionIcon";
+import { StudentAvatar } from "@/components/StudentAvatar";
+import { StudentSummaryCards } from "@/components/StudentSummaryCards";
 import { StatusBadge } from "@/components/StatusBadge";
-import { DataSurface, ResponsiveTable } from "@/components/Surface";
+import { DataSurface, FilterPanel, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import {
   applyAiEigoInvitationResult,
@@ -27,6 +31,7 @@ import { canCreateStudents, canManageAiEigoInvitations } from "@/lib/roles";
 import {
   createDefaultStudentFilters,
   filterStudents,
+  getStudentSummaryMetrics,
   getLocalDateKey,
   getStudentCourseClassOptions,
   getVisibleSelectedIds,
@@ -34,7 +39,9 @@ import {
   isValidStudentEmail,
   studentAiEigoFilterOptions,
   studentStatuses,
-  studentStartDateFilterOptions
+  studentStartDateFilterOptions,
+  studentSearchChangedEvent,
+  studentSearchRequestedEvent
 } from "@/lib/students";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -119,13 +126,25 @@ export default function StudentsPage() {
   const courseClassOptions = useMemo(() => getStudentCourseClassOptions(state.students), [state.students]);
   const activeSchools = useMemo(() => schools.filter((school) => school.status === "active"), [schools]);
   const filtersActive = hasActiveStudentFilters(filters);
+  const studentMetrics = useMemo(() => getStudentSummaryMetrics(state.students), [state.students]);
+
+  useEffect(() => {
+    function handleStudentSearchRequested(event) {
+      setFilters((current) => ({ ...current, search: event.detail || "" }));
+    }
+    window.addEventListener(studentSearchRequestedEvent, handleStudentSearchRequested);
+    window.dispatchEvent(new CustomEvent(studentSearchChangedEvent, { detail: "" }));
+    return () => window.removeEventListener(studentSearchRequestedEvent, handleStudentSearchRequested);
+  }, []);
 
   function updateFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
+    if (key === "search") window.dispatchEvent(new CustomEvent(studentSearchChangedEvent, { detail: value }));
   }
 
   function clearAllFilters() {
     setFilters(createDefaultStudentFilters());
+    window.dispatchEvent(new CustomEvent(studentSearchChangedEvent, { detail: "" }));
   }
 
   function setStudentSelection(studentId, checked) {
@@ -341,90 +360,66 @@ export default function StudentsPage() {
   return (
     <>
       <PageHeader
+        className="students-page-header"
         eyebrow="Student management"
         title="Students"
         description="Search and review student records available to your organization or school role."
+        decoration={<div className="students-header-art" aria-hidden="true"><span className="students-flight-path" /><Image src="/images/bee-classic-logo.png" alt="" width={72} height={56} /></div>}
         actions={
           canCreateStudents(profile) ? (
-            <Link className="primary-button" href="/students/new/">
-              Add student
+            <Link className="primary-button button-with-icon" href="/students/new/">
+              <ActionIcon name="plus" /> Add student
             </Link>
           ) : null
         }
       />
 
-      <div className="toolbar">
-        <label className="search-field">
+      <StudentSummaryCards metrics={studentMetrics} loading={state.loading} showAiEigo={mayManageAiEigo} />
+
+      <FilterPanel
+        title="Search & filter students"
+        icon={<ActionIcon name="filter" />}
+        actions={<button aria-label="Clear all filters" className="ghost-button students-clear-button" disabled={!filtersActive} onClick={clearAllFilters} type="button">Clear all</button>}
+      >
+        <label className="search-field students-name-filter">
           <span>Search students</span>
-          <input
-            onChange={(event) => updateFilter("search", event.target.value)}
-            placeholder="Name or preferred name"
-            type="search"
-            value={filters.search}
-          />
+          <input onChange={(event) => updateFilter("search", event.target.value)} placeholder="Name or preferred name..." type="search" value={filters.search} />
         </label>
         <label className="search-field">
           <span>Status</span>
           <select onChange={(event) => updateFilter("status", event.target.value)} value={filters.status}>
-            {studentStatusFilterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            {studentStatusFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         <label className="search-field">
           <span>School</span>
           <select onChange={(event) => updateFilter("schoolId", event.target.value)} value={filters.schoolId}>
             <option value="all">All schools</option>
-            {activeSchools.map((school) => (
-              <option key={school.id} value={school.id}>
-                {school.name}
-              </option>
-            ))}
+            {activeSchools.map((school) => <option key={school.id} value={school.id}>{school.name}</option>)}
           </select>
         </label>
         <label className="search-field">
           <span>Course / class</span>
           <select onChange={(event) => updateFilter("courseClass", event.target.value)} value={filters.courseClass}>
             <option value="all">All courses/classes</option>
-            {courseClassOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            {courseClassOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         <label className="search-field">
           <span>Start date</span>
           <select onChange={(event) => updateFilter("startDate", event.target.value)} value={filters.startDate}>
-            {studentStartDateFilterOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            {studentStartDateFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
         {mayManageAiEigo ? (
           <label className="search-field">
             <span>AI-EIGO</span>
             <select onChange={(event) => updateFilter("aiEigo", event.target.value)} value={filters.aiEigo}>
-              {studentAiEigoFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
+              {studentAiEigoFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
         ) : null}
-        <div className="toolbar-filter-actions">
-          {filtersActive ? (
-            <button className="ghost-button" onClick={clearAllFilters} type="button">
-              Clear all filters
-            </button>
-          ) : null}
-        </div>
-      </div>
+      </FilterPanel>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
       {notice ? <p className="inline-success">{notice}</p> : null}
@@ -454,12 +449,12 @@ export default function StudentsPage() {
         </div>
       ) : null}
 
-      <DataSurface aria-label="Students list">
+      <DataSurface aria-label="Students list" className="students-table-surface">
         {state.loading ? (
           <div className="table-placeholder">Loading students...</div>
         ) : visibleStudents.length ? (
           <ResponsiveTable>
-            <table>
+            <table className="students-table">
               <thead>
                 <tr>
                   {mayManageStudents ? (
@@ -494,7 +489,7 @@ export default function StudentsPage() {
                       </td>
                     ) : null}
                     <td>
-                      <Link href={`/students/profile/?id=${student.id}`}>{formatPersonName(student)}</Link>
+                      <Link className="student-name-link" href={`/students/profile/?id=${student.id}`}><StudentAvatar student={student} /><span>{formatPersonName(student)}</span></Link>
                     </td>
                     <td>
                       <StatusBadge value={student.status} />
@@ -568,17 +563,18 @@ function AiEigoStudentListCell({ actionStudentId, onSend, student }) {
   const sending = actionStudentId === student.id;
 
   return (
-    <div className="table-cell-stack">
+    <div className="student-ai-eigo-cell">
       <StatusBadge value={status} />
-      <span>{getAiEigoAccessDetail(student)}</span>
+      <span className="student-ai-eigo-detail" title={getAiEigoAccessDetail(student)}>{getAiEigoAccessDetail(student)}</span>
       {actionLabel ? (
         <button
-          className="secondary-button"
+          className="secondary-button button-with-icon"
           disabled={sending || !canSend}
           onClick={() => onSend(student)}
+          title={actionLabel}
           type="button"
         >
-          {sending ? "Queuing..." : actionLabel}
+          <ActionIcon name="send" /> {sending ? "Queuing..." : actionLabel === "Send AI-EIGO invitation" ? "Send invitation" : actionLabel}
         </button>
       ) : null}
     </div>

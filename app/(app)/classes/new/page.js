@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataSurface } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { buildClassMutation } from "@/lib/classes";
-import { createClass, fetchSchools } from "@/lib/data";
+import { createClass, fetchSchools, fetchSchoolTeachers } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -21,6 +21,31 @@ export default function NewClassPage() {
   const [foundation, setFoundation] = useState({ schools: [] });
   const [state, setState] = useState({ error: "", loading: true });
   const [submitting, setSubmitting] = useState(false);
+  const [teachers, setTeachers] = useState({ data: [], loading: false });
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadTeachers() {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase || !session || !mayManage || !form.schoolId) {
+        setTeachers({ data: [], loading: false });
+        return;
+      }
+
+      setTeachers({ data: [], loading: true });
+      const { data, error } = await fetchSchoolTeachers(supabase, form.schoolId);
+      if (!active) return;
+      setTeachers({ data: data || [], loading: false });
+      if (error) setState((current) => ({ ...current, error: error.message }));
+    }
+
+    loadTeachers();
+
+    return () => {
+      active = false;
+    };
+  }, [form.schoolId, mayManage, session]);
 
   useEffect(() => {
     let active = true;
@@ -54,7 +79,11 @@ export default function NewClassPage() {
   const activeSchools = useMemo(() => foundation.schools.filter((school) => school.status === "active"), [foundation.schools]);
 
   function updateField(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === "schoolId" ? { assignedTeacherStaffId: "" } : {})
+    }));
   }
 
   async function handleSubmit(event) {
@@ -118,11 +147,13 @@ export default function NewClassPage() {
         <ClassEditor
           cancelHref="/classes/"
           form={form}
+          loadingTeachers={teachers.loading}
           onChange={updateField}
           onSubmit={handleSubmit}
           schools={activeSchools}
           submitLabel="Create class"
           submitting={submitting}
+          teachers={teachers.data}
         />
       </DataSurface>
     </>

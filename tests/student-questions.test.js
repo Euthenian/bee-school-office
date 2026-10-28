@@ -79,7 +79,7 @@ test("global Questions badge counts due and overdue open questions only", async 
   ]);
   assert.match(adminShell, /fetchStudentQuestionBadgeCount/);
   assert.match(adminShell, /item\.href === "\/questions\/"/);
-  assert.match(adminShell, /className="nav-count-badge"/);
+  assert.match(adminShell, /className=\{`nav-count-badge /);
   assert.equal(formatCountBadgeValue(3), "3");
 });
 

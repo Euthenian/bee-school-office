@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ActionIcon } from "@/components/ActionIcon";
+import { ActionToolbar } from "@/components/ActionToolbar";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { QuestionDeleteDialog } from "@/components/QuestionDeleteDialog";
@@ -210,7 +212,7 @@ export default function QuestionsPage() {
         />
       ) : null}
 
-      <DataSurface aria-label="Student questions list">
+      <DataSurface aria-label="Student questions list" className="questions-list-surface">
         {state.loading ? (
           <div className="table-placeholder">Loading questions...</div>
         ) : state.questions.length ? (
@@ -223,7 +225,7 @@ export default function QuestionsPage() {
                   <th>Question</th>
                   <th>School</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th className="actions-column">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,20 +303,20 @@ function QuestionRow({
             </button>
           </form>
         ) : (
-          <div className="table-actions">
-            <Link className="secondary-button" href={`/students/profile/?id=${question.student_id}`}>
-              View student
+          <ActionToolbar>
+            <Link aria-label="View student" className="secondary-button action-icon-button" href={`/students/profile/?id=${question.student_id}`} title="View student">
+              <ActionIcon name="eye" />
             </Link>
-            <button className="secondary-button" disabled={actionId === question.id} onClick={() => onMarkDone(question)} type="button">
-              {actionId === question.id ? "Saving..." : "Mark done"}
+            <button aria-label="Mark done" className="secondary-button action-icon-button" disabled={actionId === question.id} onClick={() => onMarkDone(question)} title={actionId === question.id ? "Saving..." : "Mark done"} type="button">
+              <ActionIcon name="check" />
             </button>
-            <button className="secondary-button" disabled={Boolean(actionId)} onClick={() => onChangeDate(question)} type="button">
-              Change date
+            <button aria-label="Change date" className="secondary-button action-icon-button" disabled={Boolean(actionId)} onClick={() => onChangeDate(question)} title="Change date" type="button">
+              <ActionIcon name="calendar" />
             </button>
-            <button className="danger-button" disabled={Boolean(actionId)} onClick={() => onDelete(question)} type="button">
-              Delete
+            <button aria-label="Delete question" className="danger-button action-icon-button" disabled={Boolean(actionId)} onClick={() => onDelete(question)} title="Delete question" type="button">
+              <ActionIcon name="trash" />
             </button>
-          </div>
+          </ActionToolbar>
         )}
       </td>
     </tr>

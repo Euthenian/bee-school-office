@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { formatTeacherOptionName } from "@/components/StudentClassAssignment";
 import { lessonDays } from "@/lib/class-details";
 import { classStatuses } from "@/lib/classes";
 
 export function ClassEditor({
   cancelHref,
   form,
+  loadingTeachers,
   onChange,
   onSubmit,
   schools = [],
   submitLabel = "Save class",
-  submitting
+  submitting,
+  teachers = []
 }) {
   return (
     <form className="student-form" onSubmit={onSubmit}>
@@ -41,6 +44,21 @@ export function ClassEditor({
         <label>
           Lesson time
           <input onChange={(event) => onChange("lessonTime", event.target.value)} required type="time" value={form.lessonTime} />
+        </label>
+        <label>
+          Teacher
+          <select
+            disabled={!form.schoolId || loadingTeachers}
+            onChange={(event) => onChange("assignedTeacherStaffId", event.target.value)}
+            value={form.assignedTeacherStaffId}
+          >
+            <option value="">{loadingTeachers ? "Loading teachers..." : "No class teacher"}</option>
+            {teachers.map((teacher) => (
+              <option key={teacher.staff_id} value={teacher.staff_id}>
+                {formatTeacherOptionName(teacher)}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Status

@@ -133,6 +133,24 @@ test("new end date resets verification; unrelated edits do not", () => {
   assert.match(migration, /if tg_op = 'INSERT' then[\s\S]*and not public\.is_super_admin\(\)/);
 });
 
+test("RICO cancellation list shows the stored RICO customer ID beside the student name", () => {
+  const customerIdMigration = read("../supabase/migrations/20261028002000_rico_cancellation_customer_id.sql");
+  const withZeros = { ...ended, legacy_customer_id: "00012345" };
+  const missing = { ...ended, student_id: "student-3", profile_id: "profile-3", legacy_customer_id: null };
+  const rows = attachRicoCancellationAlerts([{ id: "snapshot-1", student_id: "student-1" }], [withZeros, missing], "2026-11-01");
+
+  assert.equal(rows[0].ricoCancellation.legacy_customer_id, "00012345");
+  assert.equal(rows[1].ricoCancellation.legacy_customer_id, null);
+  assert.match(customerIdMigration, /monthly_fee_yen integer,\s+legacy_customer_id text\s+\)/);
+  assert.match(customerIdMigration, /lp\.monthly_fee_yen,\s+st\.legacy_customer_id\s+from latest_profiles lp/);
+  assert.match(customerIdMigration, /lp\.billing_end_date < v_next_month_start\s+and lp\.rico_cancellation_verified_at is null/);
+  assert.match(customerIdMigration, /if not public\.is_super_admin\(\) then/);
+  assert.match(customerIdMigration, /revoke all on function public\.get_unverified_rico_cancellations_mvp\(uuid, uuid, date\) from public, anon/);
+  assert.doesNotMatch(customerIdMigration, /verify_rico_cancellation_mvp|\b(?:insert|update|delete|truncate)\b\s+(?:into\s+|from\s+)?public\./i);
+  assert.match(financePage, /monthlyFilters\.status === "rico-cancellation" && row\.ricoCancellation \? \(/);
+  assert.match(financePage, / — RICO: \{row\.ricoCancellation\.legacy_customer_id \|\| "Not assigned"\}/);
+});
+
 test("verification SQL leaves student and payment history untouched", () => {
   assert.doesNotMatch(migration, /\b(?:insert|update|delete|truncate)\s+(?:into\s+|from\s+)?public\.(?:students|student_payments|student_monthly_billing_snapshots)\b/i);
   assert.match(paymentsPage, /fetchMonthlyStudentPayments/);

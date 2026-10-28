@@ -132,7 +132,7 @@ import {
   serializeNoteRows,
   validateGuardianRows
 } from "../lib/student-form.js";
-import { studentStatuses } from "../lib/students.js";
+import { getStudentSummaryMetrics, studentStatuses } from "../lib/students.js";
 import { serializeParticipants, trialLessonStatuses } from "../lib/trial-lessons.js";
 
 const trialLessonFoundationSql = readFileSync(
@@ -1376,8 +1376,8 @@ test("sidebar trial lessons badge reuses the actionable pending booking count", 
   assert.match(adminShell, /fetchPendingTrialBookingImportCount/);
   assert.match(adminShell, /reviewStatus: "needs_action"/);
   assert.match(adminShell, /item\.href === "\/trial-lessons\/"/);
-  assert.match(adminShell, /className="nav-count-badge"/);
-  assert.match(adminShell, /\{badgeValue \? <span className="nav-count-badge">\{badgeValue\}<\/span> : null\}/);
+  assert.match(adminShell, /badgeValue \? <span className=\{`nav-count-badge /);
+  assert.match(adminShell, /\{badgeValue\}<\/span> : null/);
 });
 
 test("pending booking count helper targets unconverted actionable rows", () => {
@@ -1465,15 +1465,20 @@ test("dashboard reads and displays unhealthy Gmail Trial Booking cron health onl
   assert.match(dashboardPage, /role="alert"/);
 });
 
-test("dashboard student metrics come from persisted student status", () => {
+test("student summary counts use the same fetched rows and AI-EIGO status on both pages", () => {
   const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
+  const studentsPage = readFileSync(new URL("../app/(app)/students/page.js", import.meta.url), "utf8");
 
-  assert.match(dataSource, /countRows\(supabase, "students", \{ column: "status", value: "active" \}\)/);
-  assert.match(dataSource, /countRows\(supabase, "students", \{ column: "status", value: "inactive" \}\)/);
-  assert.match(dataSource, /countRows\(supabase, "students"\)/);
-  assert.match(dashboardPage, /label="Active Students"/);
-  assert.match(dashboardPage, /label="Inactive Students"/);
-  assert.match(dashboardPage, /label="Total Students"/);
+  assert.match(dataSource, /studentsResult.*= await Promise\.all\(\[\s*fetchStudents\(supabase\)/);
+  assert.match(dataSource, /studentMetrics: getStudentSummaryMetrics\(studentsResult\.data \|\| \[\]\)/);
+  assert.match(studentsPage, /getStudentSummaryMetrics\(state\.students\)/);
+  assert.match(studentsPage, /<StudentSummaryCards /);
+  assert.match(dashboardPage, /<StudentSummaryCards /);
+  assert.deepEqual(getStudentSummaryMetrics([
+    { status: "active", ai_eigo_student_invitations: [{ status: "sent", created_at: "2026-10-01" }] },
+    { status: "inactive", ai_eigo_student_links: [{ ai_eigo_user_id: "linked" }] },
+    { status: "pending", ai_eigo_student_invitations: [{ status: "pending_send", created_at: "2026-10-02" }] }
+  ]), { total: 3, active: 1, inactive: 1, invited: 2 });
 });
 
 test("pending booking review select and patch protect source metadata", () => {

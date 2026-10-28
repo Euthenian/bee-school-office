@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { ActionIcon } from "@/components/ActionIcon";
+import { ActionToolbar } from "@/components/ActionToolbar";
 import { ClassDeleteDialog } from "@/components/ClassDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
@@ -145,8 +147,8 @@ export default function ClassesPage() {
         title="Classes"
         description="Manage scheduled teaching units separately from student enrollments and lesson packages."
         actions={
-          <Link className="primary-button" href="/classes/new/">
-            Add class
+          <Link className="primary-button button-with-icon" href="/classes/new/">
+            <ActionIcon name="plus" /> Add Class
           </Link>
         }
       />
@@ -213,7 +215,7 @@ export default function ClassesPage() {
         />
       ) : null}
 
-      <DataSurface aria-label="Classes list">
+      <DataSurface aria-label="Classes list" className="classes-list-surface">
         {state.loading ? (
           <div className="table-placeholder">Loading classes...</div>
         ) : classes.length ? (
@@ -247,18 +249,17 @@ export default function ClassesPage() {
                       </td>
                       <td>{studentCount}</td>
                       <td className="classes-actions-cell">
-                        <div className="table-actions classes-row-actions">
-                          <Link className="secondary-button" href={`/classes/profile/?id=${classRow.id}`}>
-                            View
+                        <ActionToolbar className="classes-row-actions">
+                          <Link aria-label="View class" className="secondary-button action-icon-button" href={`/classes/profile/?id=${classRow.id}`} title="View class">
+                            <ActionIcon name="eye" />
                           </Link>
-                          <Link className="secondary-button" href={`/classes/edit/?id=${classRow.id}`}>
-                            Edit
+                          <Link aria-label="Edit class" className="secondary-button action-icon-button" href={`/classes/edit/?id=${classRow.id}`} title="Edit class">
+                            <ActionIcon name="pencil" />
                           </Link>
-                          <button className="danger-button class-delete-button" onClick={() => handleDeleteRequest(classRow)} type="button">
-                            <TrashIcon />
-                            Delete
+                          <button aria-label="Delete class" className="danger-button action-icon-button" onClick={() => handleDeleteRequest(classRow)} title="Delete class" type="button">
+                            <ActionIcon name="trash" />
                           </button>
-                        </div>
+                        </ActionToolbar>
                       </td>
                     </tr>
                   );
@@ -282,12 +283,4 @@ function buildInactiveClassInput(classRow) {
     schoolId: classRow.school_id,
     status: "inactive"
   };
-}
-
-function TrashIcon() {
-  return (
-    <svg aria-hidden="true" className="action-icon" focusable="false" viewBox="0 0 24 24">
-      <path d="M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3M5 7h14" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-    </svg>
-  );
 }

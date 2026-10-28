@@ -1,7 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ActionIcon } from "@/components/ActionIcon";
+import { ActionToolbar } from "@/components/ActionToolbar";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ClassDeleteDialog } from "@/components/ClassDeleteDialog";
 import { ClassAddStudentDialog } from "@/components/ClassAddStudentDialog";
@@ -10,10 +12,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
-import { formatLessonDay, formatLessonTime, formatTeacherName } from "@/lib/class-details";
+import { formatLessonDay, formatLessonTime, formatTeacherName, getEnrollmentTeacher } from "@/lib/class-details";
 import { selectClassEmailTemplates, summarizeClassEmailRecipients } from "@/lib/class-mail";
-import { formatClassName } from "@/lib/classes";
-import { bulkQueueClassStudentEmails, deleteClass, fetchClassProfile, fetchCommunicationTemplates, previewClassTemplateEmail, sendClassTemplateEmail, updateClass } from "@/lib/data";
+import { formatClassName, formatClassTeacher } from "@/lib/classes";
+import { bulkQueueClassStudentEmails, deleteClass, fetchClassProfile, fetchCommunicationTemplates, previewClassTemplateEmail, removeStudentFromClass, sendClassTemplateEmail, updateClass } from "@/lib/data";
 import { formatDate, formatPersonName } from "@/lib/format";
 import { canManageClasses, canManageCommunications } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -38,9 +40,15 @@ function ClassProfileContent() {
   const [deactivating, setDeactivating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [addStudentOpen, setAddStudentOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [removeError, setRemoveError] = useState("");
+  const [removing, setRemoving] = useState(false);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenuRef = useRef(null);
+  const moreButtonRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -69,6 +77,24 @@ function ClassProfileContent() {
       active = false;
     };
   }, [classId, mayManage, session]);
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!moreMenuRef.current?.contains(event.target)) setMoreOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key !== "Escape") return;
+      setMoreOpen(false);
+      moreButtonRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [moreOpen]);
 
   if (!mayManage) {
     return (
@@ -113,6 +139,7 @@ function ClassProfileContent() {
     duplicateCount: duplicateEmailCount } = summarizeClassEmailRecipients(activeStudents);
 
   function handleDeleteRequest() {
+    setMoreOpen(false);
     setDeleteError("");
     setShowDeleteDialog(true);
   }
@@ -134,6 +161,43 @@ function ClassProfileContent() {
     setAddStudentOpen(false);
     setNotice("Student added to the class.");
     return "";
+  }
+
+  function handleRemoveRequest(enrollment) {
+    setNotice("");
+    setRemoveError("");
+    setRemoveTarget(enrollment);
+  }
+
+  function handleRemoveCancel() {
+    if (removing) return;
+    setRemoveError("");
+    setRemoveTarget(null);
+  }
+
+  async function handleRemoveConfirm() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setRemoveError("You must be signed in before removing a student from a class.");
+      return;
+    }
+
+    setRemoving(true);
+    setRemoveError("");
+    const { error } = await removeStudentFromClass(supabase, classRow.id, removeTarget.id);
+    if (error) {
+      setRemoveError(error.message);
+      setRemoving(false);
+      return;
+    }
+
+    const { data, error: reloadError } = await fetchClassProfile(supabase, classRow.id);
+    if (data) setState((current) => ({ ...current, classRow: data }));
+    setRemoving(false);
+    setRemoveTarget(null);
+    setNotice(reloadError || !data
+      ? "Student removed from the class. Reload the page to see the updated list."
+      : "Student removed from the class.");
   }
 
   function handleEmailQueued(data) {
@@ -196,36 +260,46 @@ function ClassProfileContent() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Teaching operations"
-        title={formatClassName(classRow)}
-        description={classRow.schools?.name || "School not set"}
-        actions={
-          <div className="form-actions">
-            <StatusBadge value={classRow.status} />
-            {mayCommunicate ? (
-              <button
-                className="secondary-button"
-                disabled={!activeStudents.length}
-                onClick={handleEmailStudentsOpen}
-                type="button"
-              >
-                Email Students
+      <header className="class-profile-header">
+        <nav aria-label="Breadcrumb" className="class-profile-breadcrumb">
+          <Link href="/classes/"><ActionIcon name="arrow-left" /> Classes</Link>
+          <span aria-hidden="true">/</span>
+          <span>{classRow.schools?.name || "School not set"}</span>
+        </nav>
+        <div className="class-profile-title">
+          <h1>{formatClassName(classRow)}</h1>
+          <StatusBadge value={classRow.status} />
+        </div>
+        <div className="class-profile-toolbar">
+          <div className="class-profile-main-actions">
+            {classRow.status === "active" ? (
+              <button className="primary-button class-profile-action" onClick={() => setAddStudentOpen(true)} type="button">
+                <ActionIcon name="user-plus" /> Add Student
               </button>
             ) : null}
-            <Link className="secondary-button" href={`/classes/edit/?id=${classRow.id}`}>
-              Edit class
-            </Link>
-            <button className="danger-button class-delete-button" onClick={handleDeleteRequest} type="button">
-              <TrashIcon />
-              Delete class
-            </button>
-            <Link className="secondary-button" href="/classes/">
-              Back to classes
+            {mayCommunicate ? (
+              <button className="secondary-button class-profile-action" disabled={!activeStudents.length} onClick={handleEmailStudentsOpen} type="button">
+                <ActionIcon name="mail" /> Email Students
+              </button>
+            ) : null}
+            <Link className="secondary-button class-profile-action" href={`/classes/edit/?id=${classRow.id}`}>
+              <ActionIcon name="pencil" /> Edit Class
             </Link>
           </div>
-        }
-      />
+          <div className="class-profile-more" ref={moreMenuRef}>
+            <button aria-controls="class-profile-more-menu" aria-expanded={moreOpen}
+              className="secondary-button class-profile-action" onClick={() => setMoreOpen((open) => !open)}
+              ref={moreButtonRef} type="button">
+              <ActionIcon name="more" /> More
+            </button>
+            <div className="class-profile-more-menu" hidden={!moreOpen} id="class-profile-more-menu">
+              <button className="ghost-button class-profile-destructive-action" onClick={handleDeleteRequest} type="button">
+                <ActionIcon name="trash" /> Delete Class
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
 
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
       {notice ? <p className="inline-success">{notice}</p> : null}
@@ -258,6 +332,17 @@ function ClassProfileContent() {
 
       {addStudentOpen ? <ClassAddStudentDialog classRow={classRow} onAdded={handleStudentAdded} onCancel={() => setAddStudentOpen(false)} /> : null}
 
+      {removeTarget ? (
+        <ClassRemoveStudentDialog
+          classRow={classRow}
+          enrollment={removeTarget}
+          error={removeError}
+          onCancel={handleRemoveCancel}
+          onConfirm={handleRemoveConfirm}
+          removing={removing}
+        />
+      ) : null}
+
       <DataSurface>
         <SurfaceHeader>
           <h2>Class Details</h2>
@@ -276,6 +361,10 @@ function ClassProfileContent() {
             <dd>{formatLessonTime(classRow.lesson_time)}</dd>
           </div>
           <div>
+            <dt>Teacher</dt>
+            <dd>{formatClassTeacher(classRow) || "No class teacher"}</dd>
+          </div>
+          <div>
             <dt>Status</dt>
             <dd>{classRow.status}</dd>
           </div>
@@ -283,7 +372,7 @@ function ClassProfileContent() {
       </DataSurface>
 
       <DataSurface>
-        <SurfaceHeader actions={classRow.status === "active" ? <button className="secondary-button" onClick={() => setAddStudentOpen(true)} type="button">Add Student</button> : null}>
+        <SurfaceHeader>
           <h2>Students</h2>
         </SurfaceHeader>
         {enrollments.length ? (
@@ -297,6 +386,7 @@ function ClassProfileContent() {
                   <th>Enrollment status</th>
                   <th>Start date</th>
                   <th>End date</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -310,27 +400,80 @@ function ClassProfileContent() {
                       )}
                     </td>
                     <td>{enrollment.students?.status || "Unknown"}</td>
-                    <td>{formatTeacherName(enrollment.assigned_teacher)}</td>
+                    <td>{formatTeacherName(getEnrollmentTeacher(enrollment))}</td>
                     <td>
                       <StatusBadge value={enrollment.status} />
                     </td>
                     <td>{formatDate(enrollment.start_date)}</td>
                     <td>{formatDate(enrollment.end_date)}</td>
+                    <td className="classes-actions-cell">
+                      {isRemovableEnrollment(enrollment) ? (
+                        <ActionToolbar className="classes-row-actions">
+                          <button aria-label={`Remove ${formatPersonName(enrollment.students)} from class`}
+                            className="danger-button action-icon-button" onClick={() => handleRemoveRequest(enrollment)}
+                            title="Remove from class" type="button">
+                            <ActionIcon name="trash" />
+                          </button>
+                        </ActionToolbar>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </ResponsiveTable>
         ) : (
-          <EmptyState title="No enrolled students" description="Students can be assigned to this class from the student create/edit form." />
+          <EmptyState title="No enrolled students" description="No students enrolled yet. Use Add Student to enroll an existing student." />
         )}
       </DataSurface>
     </>
   );
 }
 
+function isRemovableEnrollment(enrollment) {
+  return ["active", "pending", "paused"].includes(enrollment.status);
+}
+
+function ClassRemoveStudentDialog({ classRow, enrollment, error, onCancel, onConfirm, removing }) {
+  const studentName = enrollment.students ? formatPersonName(enrollment.students) : "This student";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="remove-class-student-description"
+        aria-labelledby="remove-class-student-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="remove-class-student-title">Remove student from class?</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          <div id="remove-class-student-description" className="table-cell-stack">
+            <strong>{studentName}</strong>
+            <span>{formatClassName(classRow)}</span>
+            <span>{classRow.schools?.name || "School not set"}</span>
+          </div>
+          <p>The enrollment is ended and stays in the class history. The student record is not changed.</p>
+          {error ? <p className="inline-alert">{error}</p> : null}
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" disabled={removing} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="danger-button" disabled={removing} onClick={onConfirm} type="button">
+            {removing ? "Removing..." : "Remove from class"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function buildInactiveClassInput(classRow) {
   return {
+    assignedTeacherStaffId: classRow.assigned_teacher_staff_id,
     classId: classRow.id,
     lessonDay: classRow.lesson_day,
     lessonTime: classRow.lesson_time,
@@ -493,14 +636,6 @@ function ClassBulkMailDialog({
         </form>
       </section>
     </div>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg aria-hidden="true" className="action-icon" focusable="false" viewBox="0 0 24 24">
-      <path d="M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3M5 7h14" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-    </svg>
   );
 }
 

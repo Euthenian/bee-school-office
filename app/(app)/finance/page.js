@@ -796,6 +796,9 @@ export default function FinancePage() {
                     <tr className={row.ricoCancellation ? "monthly-billing-rico-warning" : ""} key={row.id || `rico-${row.student_id}`}>
                       <td>
                         <strong>{studentName}</strong>
+                        {monthlyFilters.status === "rico-cancellation" && row.ricoCancellation ? (
+                          <span className="muted-text"> — RICO: {row.ricoCancellation.legacy_customer_id || "Not assigned"}</span>
+                        ) : null}
                         <br />
                         <span className="muted-text">{row.school_name}</span>
                       </td>

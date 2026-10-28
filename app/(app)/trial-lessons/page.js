@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CommunicationComposer } from "@/components/CommunicationComposer";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
+import { ActionIcon } from "@/components/ActionIcon";
+import { ActionToolbar } from "@/components/ActionToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
@@ -19,6 +21,7 @@ import {
 import { formatLessonTime, formatLessonType, formatTeacherName, lessonTypes } from "@/lib/class-details";
 import {
   confirmTrialLesson,
+  convertTrialPackageToStudent,
   createTrialPackageFromTrialLesson,
   convertTrialLessonParticipant,
   convertTrialLessonProspect,
@@ -29,6 +32,7 @@ import {
   fetchPendingTrialBookingImportCount,
   fetchSchoolTeachers,
   fetchSchools,
+  fetchTrialPackageStudentCandidates,
   fetchTrialPackages,
   fetchTrialLessons,
   markTrialLessonPhoneFollowUpComplete,
@@ -36,7 +40,7 @@ import {
   updateTrialPackageStatus,
   updateTrialLessonConversionDetails
 } from "@/lib/data";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, formatPersonName } from "@/lib/format";
 import {
   buildTrialLessonColumnFilterOptions,
   defaultTrialLessonColumnFilters,
@@ -96,6 +100,7 @@ export default function TrialLessonsPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
   const [conversionCompletion, setConversionCompletion] = useState(null);
+  const [packageConversion, setPackageConversion] = useState(null);
   const [confirmingId, setConfirmingId] = useState("");
   const [convertingId, setConvertingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
@@ -690,6 +695,11 @@ export default function TrialLessonsPage() {
   }
 
   async function handlePackageStatusChange(trialPackage, status) {
+    if (status === "converted" && !trialPackage.converted_student_id) {
+      await openPackageConversion(trialPackage);
+      return;
+    }
+
     setPackageActionId(trialPackage.id);
     setActionNotice("");
     setPackageState((current) => ({ ...current, error: "" }));
@@ -714,6 +724,122 @@ export default function TrialLessonsPage() {
 
     setActionNotice("Trial package status updated.");
     setPackageActionId("");
+    setPackageRefreshKey((current) => current + 1);
+  }
+
+  async function openPackageConversion(trialPackage) {
+    const search = trialPackage.prospects?.japanese_name || trialPackage.prospects?.alphabet_name || "";
+    setPackageConversion({
+      trialPackage,
+      mode: "existing",
+      search,
+      candidates: [],
+      candidatesLoading: true,
+      selectedStudentId: "",
+      activateExisting: false,
+      firstName: "",
+      lastName: "",
+      preferredName: "",
+      confirmedNoExisting: false,
+      submitting: false,
+      error: ""
+    });
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setPackageConversion((current) => current?.trialPackage.id === trialPackage.id
+        ? { ...current, candidatesLoading: false, error: "Sign in before converting a trial package." }
+        : current);
+      return;
+    }
+
+    const { data, error } = await fetchTrialPackageStudentCandidates(supabase, trialPackage.school_id, search);
+    setPackageConversion((current) => current?.trialPackage.id === trialPackage.id && current.search === search
+      ? { ...current, candidates: data, candidatesLoading: false, error: error?.message || "" }
+      : current);
+  }
+
+  async function searchPackageConversionCandidates() {
+    if (!packageConversion) return;
+    const { trialPackage, search } = packageConversion;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setPackageConversion((current) => current ? { ...current, error: "Sign in before searching students." } : current);
+      return;
+    }
+
+    setPackageConversion((current) => current ? { ...current, candidatesLoading: true, error: "" } : current);
+    const { data, error } = await fetchTrialPackageStudentCandidates(supabase, trialPackage.school_id, search);
+    setPackageConversion((current) => current?.trialPackage.id === trialPackage.id && current.search === search
+      ? { ...current, candidates: data, candidatesLoading: false, error: error?.message || "" }
+      : current);
+  }
+
+  function updatePackageConversionField(field, value) {
+    setPackageConversion((current) => {
+      if (!current) return current;
+      if (field === "search") {
+        return {
+          ...current,
+          search: value,
+          candidates: [],
+          candidatesLoading: false,
+          selectedStudentId: "",
+          activateExisting: false,
+          error: ""
+        };
+      }
+      return { ...current, [field]: value, error: field === "error" ? value : "" };
+    });
+  }
+
+  async function handlePackageConversionConfirm() {
+    if (!packageConversion) return;
+    const conversion = packageConversion;
+    const selectedStudent = conversion.candidates.find((student) => student.id === conversion.selectedStudentId);
+    if (conversion.mode === "existing" && !selectedStudent) {
+      updatePackageConversionField("error", "Select the existing student to link.");
+      return;
+    }
+    if (conversion.mode === "existing" && ["withdrawn", "graduated"].includes(selectedStudent.status)) {
+      updatePackageConversionField("error", "Review re-enrollment in the student profile before linking this student.");
+      return;
+    }
+    if (conversion.mode === "existing" && selectedStudent.status !== "active" && !conversion.activateExisting) {
+      updatePackageConversionField("error", "Confirm that this existing student should become Active.");
+      return;
+    }
+    if (conversion.mode === "new" && (!conversion.firstName.trim() || !conversion.lastName.trim())) {
+      updatePackageConversionField("error", "Enter the student's first and last name.");
+      return;
+    }
+    if (conversion.mode === "new" && !conversion.confirmedNoExisting) {
+      updatePackageConversionField("error", "Confirm that you checked for an existing student.");
+      return;
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      updatePackageConversionField("error", "Sign in before converting a trial package.");
+      return;
+    }
+
+    setPackageConversion((current) => current ? { ...current, submitting: true, error: "" } : current);
+    const { error } = await convertTrialPackageToStudent(supabase, {
+      trialPackageId: conversion.trialPackage.id,
+      existingStudentId: conversion.mode === "existing" ? conversion.selectedStudentId : "",
+      firstName: conversion.mode === "new" ? conversion.firstName : "",
+      lastName: conversion.mode === "new" ? conversion.lastName : "",
+      preferredName: conversion.mode === "new" ? conversion.preferredName : "",
+      activateExisting: conversion.mode === "existing" && conversion.activateExisting
+    });
+    if (error) {
+      setPackageConversion((current) => current ? { ...current, submitting: false, error: error.message } : current);
+      return;
+    }
+
+    setPackageConversion(null);
+    setActionNotice("Trial package converted and linked to a student. Open the student from the package card.");
     setPackageRefreshKey((current) => current + 1);
   }
 
@@ -750,22 +876,21 @@ export default function TrialLessonsPage() {
         description="Manage prospects, trial bookings, and conversion history without creating students before they join."
         actions={
           mayManage ? (
-            <div className="form-actions">
+            <div className="form-actions page-header-actions">
               {nearestUpcomingTrialLesson ? (
                 <span className="upcoming-trial-lesson-indicator">
-                  <span aria-hidden="true" className="upcoming-trial-lesson-star">
-                    ★
-                  </span>
+                  <ActionIcon className="upcoming-trial-lesson-star" name="calendar" />
                   <span className="status-badge upcoming-trial-lesson-pill">
                     Upcoming Trial Lesson &middot; {formatUpcomingTrialLessonDate(nearestUpcomingTrialLesson)}
                   </span>
                 </span>
               ) : null}
-              <Link className="secondary-button" href="/trial-lessons/imports/">
+              <Link className="secondary-button button-with-icon" href="/trial-lessons/imports/">
+                <ActionIcon name="calendar" />
                 Pending bookings {pendingState.loading ? "..." : pendingState.count}
               </Link>
-              <Link className="primary-button" href="/trial-lessons/new/">
-                Add trial lesson
+              <Link className="primary-button button-with-icon" href="/trial-lessons/new/">
+                <ActionIcon name="plus" /> Add trial lesson
               </Link>
             </div>
           ) : null
@@ -779,8 +904,8 @@ export default function TrialLessonsPage() {
             <strong>{pendingState.loading ? "..." : pendingState.count}</strong>
             <span>Gmail Trial Booking imports waiting for staff review.</span>
           </div>
-          <Link className="secondary-button" href="/trial-lessons/imports/">
-            Review pending bookings
+          <Link className="secondary-button button-with-icon" href="/trial-lessons/imports/">
+            <ActionIcon name="eye" /> Review pending bookings
           </Link>
         </DataSurface>
       ) : null}
@@ -852,11 +977,11 @@ export default function TrialLessonsPage() {
             <strong>{selectedTrialLessonCount}</strong> selected
           </p>
           <div className="trial-lesson-selection-actions">
-            <button className="primary-button" onClick={handleBulkEmailOpen} type="button">
-              Send email
+            <button className="primary-button button-with-icon" onClick={handleBulkEmailOpen} type="button">
+              <ActionIcon name="mail" /> Send email
             </button>
-            <button className="danger-button" onClick={handleBulkDeleteRequest} type="button">
-              Delete {selectedTrialLessonCount}
+            <button className="danger-button button-with-icon" onClick={handleBulkDeleteRequest} type="button">
+              <ActionIcon name="trash" /> Delete {selectedTrialLessonCount}
             </button>
             <button className="ghost-button" onClick={clearTrialLessonSelection} type="button">
               Clear selection
@@ -918,12 +1043,22 @@ export default function TrialLessonsPage() {
           onUpdate={updateConversionCompletionField}
         />
       ) : null}
+      {packageConversion ? (
+        <TrialPackageConversionDialog
+          conversion={packageConversion}
+          onCancel={() => setPackageConversion(null)}
+          onConfirm={handlePackageConversionConfirm}
+          onSearch={searchPackageConversionCandidates}
+          onUpdate={updatePackageConversionField}
+        />
+      ) : null}
 
       {isUpcomingFilter ? null : (
         <TrialPackageTracker
           actionId={packageActionId}
           loading={packageState.loading}
           mayManage={mayManage}
+          onConvert={openPackageConversion}
           onLessonSave={handlePackageLessonSave}
           onStatusChange={handlePackageStatusChange}
           teacherOptionsBySchool={packageTeacherOptionsBySchool}
@@ -931,7 +1066,7 @@ export default function TrialLessonsPage() {
         />
       )}
 
-      <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface">
+      <DataSurface aria-label="Trial lessons list" className="trial-lessons-surface redesigned-list-surface">
         {state.loading ? (
           <div className="table-placeholder">Loading trial lessons...</div>
         ) : visibleTrialLessons.length ? (
@@ -1146,6 +1281,7 @@ function TrialPackageTracker({
   actionId,
   loading,
   mayManage,
+  onConvert,
   onLessonSave,
   onStatusChange,
   teacherOptionsBySchool,
@@ -1177,6 +1313,7 @@ function TrialPackageTracker({
             actionId={actionId}
             key={trialPackage.id}
             mayManage={mayManage}
+            onConvert={onConvert}
             onLessonSave={onLessonSave}
             onStatusChange={onStatusChange}
             teacherOptions={teacherOptionsBySchool[trialPackage.school_id] || []}
@@ -1188,7 +1325,7 @@ function TrialPackageTracker({
   );
 }
 
-function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, teacherOptions, trialPackage }) {
+function TrialPackageCard({ actionId, mayManage, onConvert, onLessonSave, onStatusChange, teacherOptions, trialPackage }) {
   const progress = getTrialPackageProgress(trialPackage);
   const nextLesson = progress.nextLesson;
   const nextScheduledLesson = progress.nextScheduledLesson;
@@ -1264,6 +1401,15 @@ function TrialPackageCard({ actionId, mayManage, onLessonSave, onStatusChange, t
           />
         ))}
       </div>
+      {trialPackage.converted_student_id && mayManage ? (
+        <Link className="secondary-button" href={`/students/profile/?id=${trialPackage.converted_student_id}`}>
+          View student
+        </Link>
+      ) : trialPackage.status === "converted" && mayManage ? (
+        <button className="primary-button" onClick={() => onConvert(trialPackage)} type="button">
+          Complete student conversion
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -1282,6 +1428,7 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
       !closedTrialLessonStatuses.includes(linkedTrialLesson.status)
   );
   const showEditor = Boolean(mayManage && (!linkedTrialLesson || editingLinkedLesson));
+  const isScheduling = lesson.status === "not_scheduled" && draft.status === "scheduled";
 
   function updateDraft(field, value) {
     setDraft((current) => {
@@ -1324,9 +1471,11 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
           </span>
         ) : null}
         {canRescheduleLinkedLesson ? (
-          <button className="secondary-button" disabled={saving} onClick={() => setEditingLinkedLesson(true)} type="button">
-            Reschedule
-          </button>
+          <div className="trial-package-lesson-actions">
+            <button className="info-button button-with-icon" disabled={saving} onClick={() => setEditingLinkedLesson(true)} type="button">
+              <ActionIcon name="calendar-clock" /> Reschedule
+            </button>
+          </div>
         ) : null}
       </div>
     );
@@ -1366,14 +1515,16 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
           ))}
         </select>
       </label>
-      <button className="secondary-button" disabled={saving} onClick={saveLesson} type="button">
-        {saving ? "Saving..." : "Save"}
-      </button>
-      {linkedTrialLesson ? (
-        <button className="ghost-button" disabled={saving} onClick={cancelLinkedLessonEdit} type="button">
-          Cancel
+      <div className="trial-package-lesson-actions">
+        <button className="primary-button button-with-icon" disabled={saving} onClick={saveLesson} type="button">
+          <ActionIcon name={isScheduling ? "calendar" : "save"} /> {saving ? "Saving..." : isScheduling ? "Schedule" : "Save"}
         </button>
-      ) : null}
+        {linkedTrialLesson ? (
+          <button className="secondary-button" disabled={saving} onClick={cancelLinkedLessonEdit} type="button">
+            Cancel
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1685,7 +1836,7 @@ function TrialLessonRow({
       </td>
       {mayManage ? (
         <td>
-          <div className="table-actions trial-lesson-actions">
+          <ActionToolbar className="trial-lesson-actions">
             {linkedStudentId ? (
               <Link
                 aria-label="View student"
@@ -1778,7 +1929,7 @@ function TrialLessonRow({
             >
               <ActionIcon name="trash" />
             </button>
-          </div>
+          </ActionToolbar>
         </td>
       ) : null}
     </tr>
@@ -1787,111 +1938,6 @@ function TrialLessonRow({
 
 function getTrialLessonProspectId(trialLesson) {
   return trialLesson?.prospect_id || trialLesson?.prospects?.id || "";
-}
-
-function ActionIcon({ name }) {
-  const icons = {
-    check: (
-      <path
-        d="M5 12.5 9.1 16.5 19 6.5"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-    ),
-    eye: (
-      <>
-        <path
-          d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-        <circle cx="12" cy="12" fill="none" r="3" stroke="currentColor" strokeWidth="2" />
-      </>
-    ),
-    phone: (
-      <path
-        d="M6.5 4.5 9 4l2 4-1.8 1.2a11 11 0 0 0 5.6 5.6L16 13l4 2-.5 2.5c-.2 1-1.1 1.7-2.1 1.6C10.5 18.6 5.4 13.5 4.9 6.6c-.1-1 .6-1.9 1.6-2.1Z"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-    ),
-    send: (
-      <>
-        <path
-          d="M21 3 10 14"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-        <path
-          d="m21 3-7 18-4-7-7-4 18-7Z"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-      </>
-    ),
-    trash: (
-      <>
-        <path
-          d="M4 7h16"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-        <path
-          d="M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-      </>
-    ),
-    "user-plus": (
-      <>
-        <path
-          d="M15 19c0-2.2-2.2-4-5-4s-5 1.8-5 4"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-        <circle cx="10" cy="8" fill="none" r="3" stroke="currentColor" strokeWidth="2" />
-        <path
-          d="M19 8v6M16 11h6"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        />
-      </>
-    )
-  };
-
-  return (
-    <svg aria-hidden="true" className="action-icon" focusable="false" viewBox="0 0 24 24">
-      {icons[name]}
-    </svg>
-  );
 }
 
 function DeleteTrialLessonDialog({ deleting, error, onCancel, onConfirm }) {
@@ -2019,6 +2065,134 @@ function ConversionCompletionDialog({ classLevels, completion, onCancel, onConfi
           </button>
           <button className="primary-button" disabled={!canConvert} onClick={onConfirm} type="button">
             {completion.converting ? "Converting..." : "Convert to student"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TrialPackageConversionDialog({ conversion, onCancel, onConfirm, onSearch, onUpdate }) {
+  const selectedStudent = conversion.candidates.find((student) => student.id === conversion.selectedStudentId);
+  const selectedNeedsActivation = selectedStudent && selectedStudent.status !== "active";
+  const selectedNeedsReview = selectedStudent && ["withdrawn", "graduated"].includes(selectedStudent.status);
+  const canSubmit = !conversion.submitting && (conversion.mode === "existing"
+    ? Boolean(!conversion.candidatesLoading && selectedStudent && !selectedNeedsReview && (!selectedNeedsActivation || conversion.activateExisting))
+    : Boolean(conversion.firstName.trim() && conversion.lastName.trim() && conversion.confirmedNoExisting));
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        aria-describedby="package-conversion-description"
+        aria-labelledby="package-conversion-title"
+        aria-modal="true"
+        className="communication-modal confirmation-modal"
+        role="dialog"
+      >
+        <header className="communication-modal-header">
+          <h2 id="package-conversion-title">Convert Trial Package to student</h2>
+        </header>
+        <div className="confirmation-modal-body">
+          <p id="package-conversion-description">
+            Prospect: {formatProspectName(conversion.trialPackage.prospects)}. Choose the student before the package is marked Converted.
+          </p>
+          <label>
+            Student record
+            <select
+              disabled={conversion.submitting}
+              onChange={(event) => onUpdate("mode", event.target.value)}
+              value={conversion.mode}
+            >
+              <option value="existing">Use an existing student</option>
+              <option value="new">Create a new student</option>
+            </select>
+          </label>
+          {conversion.mode === "existing" ? (
+            <div className="stack-list">
+              <label>
+                Find a student in this school
+                <input
+                  disabled={conversion.submitting}
+                  onChange={(event) => onUpdate("search", event.target.value)}
+                  placeholder="Search by first, last, or Japanese name"
+                  type="search"
+                  value={conversion.search}
+                />
+              </label>
+              <button className="secondary-button" disabled={conversion.submitting || conversion.candidatesLoading} onClick={onSearch} type="button">
+                {conversion.candidatesLoading ? "Searching..." : "Search students"}
+              </button>
+              <label>
+                Existing student
+                <select
+                  disabled={conversion.submitting || conversion.candidatesLoading}
+                  onChange={(event) => onUpdate("selectedStudentId", event.target.value)}
+                  value={conversion.selectedStudentId}
+                >
+                  <option value="">Select a student</option>
+                  {conversion.candidates.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {formatPersonName(student)} — {student.status} — {student.id.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!conversion.candidatesLoading && !conversion.candidates.length ? (
+                <p>No matching student found. Search another name or choose Create a new student.</p>
+              ) : null}
+              {selectedStudent ? (
+                <Link href={`/students/profile/?id=${selectedStudent.id}`} rel="noopener noreferrer" target="_blank">
+                  Review selected student profile
+                </Link>
+              ) : null}
+              {selectedNeedsReview ? (
+                <p className="inline-alert">This student is {selectedStudent.status}. Review re-enrollment in the student profile first.</p>
+              ) : selectedNeedsActivation ? (
+                <label className="primary-check">
+                  <input
+                    checked={conversion.activateExisting}
+                    disabled={conversion.submitting}
+                    onChange={(event) => onUpdate("activateExisting", event.target.checked)}
+                    type="checkbox"
+                  />
+                  Set this {selectedStudent.status} student to Active as part of conversion
+                </label>
+              ) : null}
+            </div>
+          ) : (
+            <div className="stack-list">
+              <p>Confirm the student&apos;s name. The prospect&apos;s contact details will be reused. No class enrollment will be created.</p>
+              <div className="form-grid">
+                <label>
+                  First name
+                  <input disabled={conversion.submitting} onChange={(event) => onUpdate("firstName", event.target.value)} required value={conversion.firstName} />
+                </label>
+                <label>
+                  Last name
+                  <input disabled={conversion.submitting} onChange={(event) => onUpdate("lastName", event.target.value)} required value={conversion.lastName} />
+                </label>
+                <label>
+                  Preferred / Japanese name
+                  <input disabled={conversion.submitting} onChange={(event) => onUpdate("preferredName", event.target.value)} value={conversion.preferredName} />
+                </label>
+              </div>
+              <label className="primary-check">
+                <input
+                  checked={conversion.confirmedNoExisting}
+                  disabled={conversion.submitting}
+                  onChange={(event) => onUpdate("confirmedNoExisting", event.target.checked)}
+                  type="checkbox"
+                />
+                I checked that this student does not already have a record
+              </label>
+            </div>
+          )}
+          {conversion.error ? <p className="inline-alert">{conversion.error}</p> : null}
+        </div>
+        <div className="form-actions confirmation-modal-actions">
+          <button className="secondary-button" disabled={conversion.submitting} onClick={onCancel} type="button">Cancel</button>
+          <button className="primary-button" disabled={!canSubmit} onClick={onConfirm} type="button">
+            {conversion.submitting ? "Converting..." : "Convert package"}
           </button>
         </div>
       </section>

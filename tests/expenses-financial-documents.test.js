@@ -144,7 +144,7 @@ test("navigation badges count financial documents and To Do items from real data
   assert.match(adminShell, /fetchOfficeTodoBadgeCount/);
   assert.match(adminShell, /item\.href === "\/expenses\/financial-docs\/"/);
   assert.match(adminShell, /item\.href === "\/todo\/"/);
-  assert.match(adminShell, /className="nav-count-badge"/);
+  assert.match(adminShell, /className=\{`nav-count-badge /);
 
   const financial = createCountRecorder(2);
   await fetchFinancialDocumentBadgeCount(financial.supabase);

@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataSurface } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { buildClassMutation, formatClassName } from "@/lib/classes";
-import { fetchClassProfile, fetchSchools, updateClass } from "@/lib/data";
+import { fetchClassProfile, fetchSchools, fetchSchoolTeachers, updateClass } from "@/lib/data";
 import { canManageClasses } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
@@ -32,6 +32,31 @@ function EditClassContent() {
   const [foundation, setFoundation] = useState({ schools: [] });
   const [state, setState] = useState({ error: "", loading: true });
   const [submitting, setSubmitting] = useState(false);
+  const [teachers, setTeachers] = useState({ data: [], loading: false });
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadTeachers() {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase || !session || !mayManage || !form.schoolId) {
+        setTeachers({ data: [], loading: false });
+        return;
+      }
+
+      setTeachers({ data: [], loading: true });
+      const { data, error } = await fetchSchoolTeachers(supabase, form.schoolId);
+      if (!active) return;
+      setTeachers({ data: data || [], loading: false });
+      if (error) setState((current) => ({ ...current, error: error.message }));
+    }
+
+    loadTeachers();
+
+    return () => {
+      active = false;
+    };
+  }, [form.schoolId, mayManage, session]);
 
   useEffect(() => {
     let active = true;
@@ -58,6 +83,7 @@ function EditClassContent() {
       setClassRow(classResult.data || null);
       setForm(
         buildClassMutation({
+          assignedTeacherStaffId: classResult.data?.assigned_teacher_staff_id,
           lessonDay: classResult.data?.lesson_day,
           lessonTime: String(classResult.data?.lesson_time || "").slice(0, 5),
           schoolId: classResult.data?.school_id,
@@ -79,6 +105,15 @@ function EditClassContent() {
     () => foundation.schools.filter((school) => school.status === "active" || school.id === form.schoolId),
     [form.schoolId, foundation.schools]
   );
+
+  // Keep the saved teacher selectable even if they no longer teach at this school,
+  // so saving other fields does not silently clear it.
+  const teacherOptions = useMemo(() => {
+    const current = classRow?.assigned_teacher_staff;
+    if (!current || teachers.data.some((teacher) => teacher.staff_id === current.id)) return teachers.data;
+    return [...teachers.data, { staff_id: current.id, display_name: current.display_name,
+      legal_name: current.legal_name, email: current.email }];
+  }, [classRow, teachers.data]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -159,10 +194,12 @@ function EditClassContent() {
         <ClassEditor
           cancelHref={`/classes/profile/?id=${classId}`}
           form={form}
+          loadingTeachers={teachers.loading}
           onChange={updateField}
           onSubmit={handleSubmit}
           schools={availableSchools}
           submitting={submitting}
+          teachers={teacherOptions}
         />
       </DataSurface>
     </>

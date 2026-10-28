@@ -6,7 +6,12 @@ import {
   getTrialPackageProgress,
   sortTrialPackageLessons
 } from "../lib/trial-packages.js";
-import { trialPackageSelect } from "../lib/data.js";
+import {
+  convertTrialPackageToStudent,
+  fetchTrialPackageStudentCandidates,
+  trialPackageSelect
+} from "../lib/data.js";
+import { createDefaultStudentFilters, filterStudents } from "../lib/students.js";
 
 const migrationSql = readFileSync(
   new URL("../supabase/migrations/20260926001000_trial_package_tracker.sql", import.meta.url),
@@ -28,10 +33,100 @@ const trialPackageRescheduleMigrationSql = readFileSync(
   new URL("../supabase/migrations/20260929001000_reschedule_linked_trial_package_lessons.sql", import.meta.url),
   "utf8"
 );
+const trialPackageConversionMigrationSql = readFileSync(
+  new URL("../supabase/migrations/20261027001000_trial_package_student_conversion.sql", import.meta.url),
+  "utf8"
+);
 const trialLessonsPage = readFileSync(new URL("../app/(app)/trial-lessons/page.js", import.meta.url), "utf8");
 const newTrialLessonPage = readFileSync(new URL("../app/(app)/trial-lessons/new/page.js", import.meta.url), "utf8");
 const dataSource = readFileSync(new URL("../lib/data.js", import.meta.url), "utf8");
 const importReviewPage = readFileSync(new URL("../app/(app)/trial-lessons/imports/review/page.js", import.meta.url), "utf8");
+
+test("package conversion sends the selected or confirmed new student details in one RPC", async () => {
+  const calls = [];
+  const supabase = {
+    rpc: async (name, args) => {
+      calls.push([name, args]);
+      return { data: "student-1", error: null };
+    }
+  };
+
+  const existing = await convertTrialPackageToStudent(supabase, {
+    trialPackageId: "package-1",
+    existingStudentId: "student-1",
+    activateExisting: true
+  });
+  const created = await convertTrialPackageToStudent(supabase, {
+    trialPackageId: "package-2",
+    firstName: "Hana",
+    lastName: "Sato",
+    preferredName: "佐藤 花"
+  });
+
+  assert.equal(existing.data, "student-1");
+  assert.equal(created.data, "student-1");
+  assert.deepEqual(calls, [
+    ["convert_trial_package_to_student_mvp", {
+      p_trial_package_id: "package-1",
+      p_existing_student_id: "student-1",
+      p_first_name: null,
+      p_last_name: null,
+      p_preferred_name: null,
+      p_activate_existing: true
+    }],
+    ["convert_trial_package_to_student_mvp", {
+      p_trial_package_id: "package-2",
+      p_existing_student_id: null,
+      p_first_name: "Hana",
+      p_last_name: "Sato",
+      p_preferred_name: "佐藤 花",
+      p_activate_existing: false
+    }]
+  ]);
+});
+
+test("student lookup stays in the package school and the Students directory includes converted students", async () => {
+  const calls = [];
+  const query = {
+    select(value) { calls.push(["select", value]); return this; },
+    eq(field, value) { calls.push(["eq", field, value]); return this; },
+    order(field, options) { calls.push(["order", field, options]); return this; },
+    limit(value) { calls.push(["limit", value]); return this; },
+    or(value) { calls.push(["or", value]); return this; },
+    then(resolve) { return Promise.resolve({ data: [], error: null }).then(resolve); }
+  };
+  const supabase = { from(table) { calls.push(["from", table]); return query; } };
+  await fetchTrialPackageStudentCandidates(supabase, "school-1", "佐藤 花");
+
+  assert.deepEqual(calls[0], ["from", "students"]);
+  assert.ok(calls.some((call) => call[0] === "eq" && call[1] === "school_id" && call[2] === "school-1"));
+  assert.ok(calls.some((call) => call[0] === "or" && call[1].includes("legacy_japanese_name.ilike")));
+  assert.ok(calls.some((call) => call[0] === "limit" && call[1] === 30));
+
+  const students = [
+    { id: "new-student", first_name: "Hana", last_name: "Sato", status: "active" },
+    { id: "existing-student", first_name: "Hana", last_name: "Sato", status: "inactive" }
+  ];
+  assert.deepEqual(filterStudents(students, createDefaultStudentFilters()).map((student) => student.id), [
+    "new-student", "existing-student"
+  ]);
+});
+
+test("conversion migration keeps existing incomplete packages repairable and blocks future status-only conversion", () => {
+  assert.match(trialPackageConversionMigrationSql, /trial_packages_converted_student_required[\s\S]*not valid/);
+  assert.match(trialPackageConversionMigrationSql, /create or replace function public\.convert_trial_package_to_student_mvp/);
+  assert.match(trialPackageConversionMigrationSql, /from public\.trial_packages tp[\s\S]*for update/);
+  assert.match(trialPackageConversionMigrationSql, /from public\.prospects pr[\s\S]*for update/);
+  assert.match(trialPackageConversionMigrationSql, /if p_existing_student_id is not null then[\s\S]*v_student_id := p_existing_student_id/);
+  assert.doesNotMatch(trialPackageConversionMigrationSql, /v_linked_student_ids/);
+  assert.match(trialPackageConversionMigrationSql, /if v_first_name is null or v_last_name is null/);
+  assert.match(trialPackageConversionMigrationSql, /insert into public\.students/);
+  assert.match(trialPackageConversionMigrationSql, /set status = 'converted', converted_student_id = v_student_id/);
+  assert.match(trialPackageConversionMigrationSql, /if p_status = 'converted' and v_package\.converted_student_id is null/);
+  assert.doesNotMatch(trialPackageConversionMigrationSql, /insert into public\.student_enrollments|insert into public\.classes/i);
+  assert.match(trialLessonsPage, /status === "converted" && !trialPackage\.converted_student_id/);
+  assert.match(trialLessonsPage, /Complete student conversion/);
+});
 
 test("trial packages are modeled as a parent package with child occurrence rows", () => {
   assert.match(migrationSql, /create table if not exists public\.trial_packages/);

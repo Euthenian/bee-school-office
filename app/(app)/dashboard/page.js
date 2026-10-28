@@ -6,6 +6,7 @@ import { CoachBriefSessions } from "@/components/CoachBriefSessions";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
+import { StudentSummaryCards } from "@/components/StudentSummaryCards";
 import { DataSurface, MetricCard, ResponsiveTable, SurfaceHeader } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -14,16 +15,18 @@ import {
 } from "@/lib/cron-health";
 import { formatDate, formatDateTime, formatPersonName } from "@/lib/format";
 import { fetchDashboardData } from "@/lib/data";
-import { canManageTrialLessons } from "@/lib/roles";
+import { canManageAiEigoInvitations, canManageTrialLessons } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 export default function DashboardPage() {
   const { profile, session } = useAuth();
   const mayViewCronHealth = canManageTrialLessons(profile);
+  const mayManageAiEigo = canManageAiEigoInvitations(profile);
   const [state, setState] = useState({
     loading: true,
     error: "",
     metrics: null,
+    studentMetrics: null,
     recentStudents: [],
     cronHealth: null
   });
@@ -42,7 +45,7 @@ export default function DashboardPage() {
       if (!active) return;
 
       if (error) {
-        setState({ loading: false, error: error.message, metrics: null, recentStudents: [], cronHealth: null });
+        setState({ loading: false, error: error.message, metrics: null, studentMetrics: null, recentStudents: [], cronHealth: null });
         return;
       }
 
@@ -50,6 +53,7 @@ export default function DashboardPage() {
         loading: false,
         error: "",
         metrics: data.metrics,
+        studentMetrics: data.studentMetrics,
         recentStudents: data.recentStudents,
         cronHealth: data.cronHealth
       });
@@ -73,10 +77,9 @@ export default function DashboardPage() {
       {state.error ? <p className="inline-alert">{state.error}</p> : null}
       {shouldShowGmailTrialBookingCronHealthAlert(state.cronHealth) ? <CronHealthAlert health={state.cronHealth} /> : null}
 
+      <StudentSummaryCards metrics={state.studentMetrics} loading={state.loading} showAiEigo={mayManageAiEigo} />
+
       <section className="metric-grid" aria-label="Dashboard metrics">
-        <MetricCard label="Active Students" loading={state.loading} value={state.metrics?.activeStudents} />
-        <MetricCard label="Inactive Students" loading={state.loading} value={state.metrics?.inactiveStudents} />
-        <MetricCard label="Total Students" loading={state.loading} value={state.metrics?.totalStudents} />
         <MetricCard label="Schools" loading={state.loading} value={state.metrics?.schools} />
         <MetricCard label="Staff" loading={state.loading} value={state.metrics?.staff} />
       </section>

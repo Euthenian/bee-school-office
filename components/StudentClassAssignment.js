@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { formatLessonType } from "@/lib/class-details";
 import { formatLessonPackageOption } from "@/lib/billing-plans";
-import { formatClassOption } from "@/lib/classes";
+import { formatClassName, formatClassOption } from "@/lib/classes";
 import { formatMonthlyFeeYen } from "@/lib/student-finance";
 
 const customFeeValue = "__custom_fee";
@@ -21,6 +21,16 @@ export function StudentClassAssignment({
 }) {
   const selectedBillingPlan = billingPlans.find((plan) => plan.id === form.billingPlanId);
   const selectedLevel = selectedBillingPlan ? getPlanLevel(selectedBillingPlan, classLevels) : null;
+  const selectedClass = classes.find((classRow) => classRow.id === form.classId);
+  const classTeacherId = selectedClass?.assigned_teacher_staff_id || "";
+  const teacherMismatch = Boolean(classTeacherId && form.assignedTeacherStaffId && form.assignedTeacherStaffId !== classTeacherId);
+
+  // A class with its own teacher only accepts students assigned to that teacher.
+  function updateClass(value) {
+    onChange("classId", value);
+    const teacherId = classes.find((classRow) => classRow.id === value)?.assigned_teacher_staff_id;
+    if (teacherId) onChange("assignedTeacherStaffId", teacherId);
+  }
 
   function updateBillingPlan(value) {
     if (value === customFeeValue) {
@@ -51,7 +61,7 @@ export function StudentClassAssignment({
           Class time
           <select
             disabled={!form.schoolId || loadingClasses}
-            onChange={(event) => onChange("classId", event.target.value)}
+            onChange={(event) => updateClass(event.target.value)}
             required
             value={form.classId}
           >
@@ -109,6 +119,12 @@ export function StudentClassAssignment({
         </label>
       </div>
 
+      {teacherMismatch ? (
+        <p className="inline-alert">
+          {formatClassName(selectedClass)} has a different teacher. Choose the class for the selected teacher.
+        </p>
+      ) : null}
+
       {selectedBillingPlan ? (
         <dl className="detail-list">
           <div>
@@ -143,7 +159,7 @@ export function StudentClassAssignment({
   );
 }
 
-function formatTeacherOptionName(teacher) {
+export function formatTeacherOptionName(teacher) {
   return teacher?.display_name || teacher?.full_name || teacher?.legal_name || teacher?.name || teacher?.email || "Unnamed teacher";
 }
 

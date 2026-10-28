@@ -34,3 +34,6 @@ data/legacy/taiken-audit/*
 
 # Finance/banking audit reports are local-only because they summarize sensitive data
 data/legacy/finance-banking-audit/
+
+# Class repair parameters and dry-run output identify real student records
+data/class-repairs/

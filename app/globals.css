@@ -2294,6 +2294,10 @@ dd {
   .student-ai-eigo-detail { max-width: 80px; }
 }
 
+@media (max-width: 400px) {
+  .students-summary-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* Keep the shared waves in view even when the page beside the sidebar is long. */
 .sidebar {
   align-self: start;

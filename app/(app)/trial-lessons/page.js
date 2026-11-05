@@ -34,6 +34,7 @@ import {
   fetchSchools,
   fetchTrialPackageStudentCandidates,
   fetchTrialPackages,
+  fetchTrialLessonDetails,
   fetchTrialLessons,
   markTrialLessonPhoneFollowUpComplete,
   updateTrialPackageLesson,
@@ -50,11 +51,13 @@ import {
   formatParticipantName,
   formatProspectName,
   formatTrialLevel,
+  formatTrialStatus,
   formatUpcomingTrialLessonDate,
   getNearestUpcomingTrialLesson,
   getLocalDateKey,
   getMissingTrialLessonConversionFields,
   getPrimaryParticipant,
+  getTrialLessonRowNames,
   getTrialLessonPersonSearchValue,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
@@ -67,6 +70,7 @@ import {
   formatTrialPackageLessonStatus,
   formatTrialPackageLessonSchedule,
   formatTrialPackageLessonTeacher,
+  formatTrialPackageStatus,
   formatTrialPackageSummary,
   formatTrialPackageType,
   getTrialPackageProgress,
@@ -96,6 +100,8 @@ export default function TrialLessonsPage() {
   const [pendingState, setPendingState] = useState({ loading: true, count: 0 });
   const [actionNotice, setActionNotice] = useState("");
   const [communicatingTrialLesson, setCommunicatingTrialLesson] = useState(null);
+  const [detailsState, setDetailsState] = useState(null);
+  const detailsRequestRef = useRef(0);
   const [bulkCommunicatingTrialLessons, setBulkCommunicatingTrialLessons] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState("");
@@ -261,13 +267,27 @@ export default function TrialLessonsPage() {
       ]);
       if (!active) return;
 
+      const linkedTrialLessonIds = search.trim()
+        ? [...new Set((trialPackagesResult.data || []).flatMap((trialPackage) =>
+            (trialPackage.trial_package_lessons || []).map((lesson) => lesson.trial_lesson_id).filter(Boolean)
+          ))]
+        : [];
+      const linkedTrialLessonsResult = linkedTrialLessonIds.length
+        ? await fetchTrialLessons(supabase, { ...filters, search: "", trialLessonIds: linkedTrialLessonIds })
+        : { data: [], error: null };
+      if (!active) return;
+      const trialLessons = [...new Map([
+        ...(trialLessonsResult.data || []),
+        ...(linkedTrialLessonsResult.data || [])
+      ].map((trialLesson) => [trialLesson.id, trialLesson])).values()];
+
       setState({
         loading: false,
-        error: [trialLessonsResult.error, pendingBookingsResult.error]
+        error: [trialLessonsResult.error, linkedTrialLessonsResult.error, pendingBookingsResult.error]
           .filter(Boolean)
           .map((error) => error.message)
           .join(" "),
-        trialLessons: trialLessonsResult.data || []
+        trialLessons
       });
       setPackageState({
         loading: false,
@@ -868,6 +888,31 @@ export default function TrialLessonsPage() {
     setPackageRefreshKey((current) => current + 1);
   }
 
+  async function openTrialLessonDetails(trialLesson) {
+    const requestId = ++detailsRequestRef.current;
+    setDetailsState({ loading: true, error: "", trialLesson: null, linkedPackage: null });
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase || !session) {
+      setDetailsState({ loading: false, error: "You must be signed in to view trial lesson details.", trialLesson: null, linkedPackage: null });
+      return;
+    }
+
+    const result = await fetchTrialLessonDetails(supabase, trialLesson.id);
+    if (requestId !== detailsRequestRef.current) return;
+    setDetailsState({
+      loading: false,
+      error: result.error?.message || (!result.data ? "Trial lesson details are unavailable." : ""),
+      trialLesson: result.data,
+      linkedPackage: result.linkedPackage
+    });
+  }
+
+  function closeTrialLessonDetails() {
+    detailsRequestRef.current += 1;
+    setDetailsState(null);
+  }
+
   return (
     <>
       <PageHeader
@@ -971,6 +1016,10 @@ export default function TrialLessonsPage() {
       ))}
       {actionNotice ? <p className="inline-success">{actionNotice}</p> : null}
 
+      {detailsState ? (
+        <TrialLessonDetailsDialog details={detailsState} onClose={closeTrialLessonDetails} />
+      ) : null}
+
       {selectedTrialLessonCount > 0 && mayManage ? (
         <div className="trial-lesson-selection-bar">
           <p>
@@ -1060,6 +1109,7 @@ export default function TrialLessonsPage() {
           mayManage={mayManage}
           onConvert={openPackageConversion}
           onLessonSave={handlePackageLessonSave}
+          onViewDetails={openTrialLessonDetails}
           onStatusChange={handlePackageStatusChange}
           teacherOptionsBySchool={packageTeacherOptionsBySchool}
           trialPackages={packageState.trialPackages}
@@ -1232,7 +1282,7 @@ export default function TrialLessonsPage() {
                       value={columnFilters.status}
                     />
                   </ColumnFilterHeader>
-                  {mayManage ? <th>Actions</th> : null}
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1259,6 +1309,7 @@ export default function TrialLessonsPage() {
                       onSelectionChange={setTrialLessonSelection}
                       onRequestDelete={handleDeleteRequest}
                       onOpenComposer={setCommunicatingTrialLesson}
+                      onViewDetails={openTrialLessonDetails}
                       onPhoneFollowUpComplete={handlePhoneFollowUpComplete}
                       phoneFollowUpId={phoneFollowUpId}
                       todayKey={todayKey}
@@ -1283,6 +1334,7 @@ function TrialPackageTracker({
   mayManage,
   onConvert,
   onLessonSave,
+  onViewDetails,
   onStatusChange,
   teacherOptionsBySchool,
   trialPackages
@@ -1315,6 +1367,7 @@ function TrialPackageTracker({
             mayManage={mayManage}
             onConvert={onConvert}
             onLessonSave={onLessonSave}
+            onViewDetails={onViewDetails}
             onStatusChange={onStatusChange}
             teacherOptions={teacherOptionsBySchool[trialPackage.school_id] || []}
             trialPackage={trialPackage}
@@ -1325,7 +1378,7 @@ function TrialPackageTracker({
   );
 }
 
-function TrialPackageCard({ actionId, mayManage, onConvert, onLessonSave, onStatusChange, teacherOptions, trialPackage }) {
+function TrialPackageCard({ actionId, mayManage, onConvert, onLessonSave, onStatusChange, onViewDetails, teacherOptions, trialPackage }) {
   const progress = getTrialPackageProgress(trialPackage);
   const nextLesson = progress.nextLesson;
   const nextScheduledLesson = progress.nextScheduledLesson;
@@ -1395,6 +1448,7 @@ function TrialPackageCard({ actionId, mayManage, onConvert, onLessonSave, onStat
             lesson={lesson}
             mayManage={mayManage}
             onSave={onLessonSave}
+            onViewDetails={onViewDetails}
             saving={actionId === lesson.id}
             teacherOptions={teacherOptions}
             totalLessons={progress.total}
@@ -1414,7 +1468,7 @@ function TrialPackageCard({ actionId, mayManage, onConvert, onLessonSave, onStat
   );
 }
 
-function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOptions, totalLessons }) {
+function TrialPackageLessonEditor({ lesson, mayManage, onSave, onViewDetails, saving, teacherOptions, totalLessons }) {
   const [draft, setDraft] = useState(() => buildTrialPackageLessonDraft(lesson));
   const [editingLinkedLesson, setEditingLinkedLesson] = useState(false);
   const linkedTrialLesson = lesson.linked_trial_lesson;
@@ -1466,9 +1520,14 @@ function TrialPackageLessonEditor({ lesson, mayManage, onSave, saving, teacherOp
         <span>{lessonSchedule}</span>
         <span>{formatTrialPackageLessonTeacher(lesson)}</span>
         {linkedTrialLesson ? (
-          <span>
-            Linked Trial Lesson: <StatusBadge value={linkedTrialLesson.status || "booked"} />
-          </span>
+          <button
+            aria-label={`View linked trial lesson details, ${linkedTrialLesson.status || "booked"}`}
+            className="secondary-button button-with-icon trial-package-linked-lesson-button"
+            onClick={() => onViewDetails(linkedTrialLesson)}
+            type="button"
+          >
+            <ActionIcon name="eye" /> Linked Trial Lesson: <StatusBadge value={linkedTrialLesson.status || "booked"} />
+          </button>
         ) : null}
         {canRescheduleLinkedLesson ? (
           <div className="trial-package-lesson-actions">
@@ -1760,6 +1819,104 @@ function BulkCommunicationComposer({ defaultMessageType, isSignedIn, onCancel, o
   );
 }
 
+function TrialLessonDetailsDialog({ details, onClose }) {
+  const closeButtonRef = useRef(null);
+  const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = dialogRef.current?.querySelectorAll('button:not([disabled]), a[href]');
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus?.();
+    };
+  }, []);
+
+  const trialLesson = details.trialLesson;
+  const prospect = trialLesson?.prospects;
+  const participants = trialLesson?.trial_lesson_participants || [];
+  const contacts = prospect?.prospect_contacts || [];
+  const linkedPackage = details.linkedPackage?.trial_packages;
+  const packageLabel = linkedPackage
+    ? `${formatTrialPackageType(linkedPackage.package_type)} · Lesson ${details.linkedPackage.lesson_number || "Not set"} of ${linkedPackage.total_lessons || "Not set"} · ${formatTrialPackageStatus(linkedPackage.status)}`
+    : "Not set";
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-labelledby="trial-lesson-details-title" aria-modal="true" className="communication-modal trial-lesson-details-modal" ref={dialogRef} role="dialog">
+        <header className="communication-modal-header">
+          <h2 id="trial-lesson-details-title">Trial Lesson Details</h2>
+          <button className="ghost-button" onClick={onClose} ref={closeButtonRef} type="button">Close</button>
+        </header>
+        {details.loading ? <p className="trial-lesson-details-message">Loading details...</p> : null}
+        {details.error ? <p className="inline-alert trial-lesson-details-message" role="alert">{details.error}</p> : null}
+        {!details.loading && !details.error && trialLesson ? (
+          <dl className="detail-list trial-lesson-details-list">
+            <div><dt>Prospect / contact person</dt><dd>{formatProspectName(prospect)}</dd></div>
+            <div><dt>Prospect furigana</dt><dd>{prospect?.furigana || "Not set"}</dd></div>
+            <div><dt>Contact email</dt><dd>{contacts.filter((contact) => contact.contact_type === "email").map((contact) => contact.value).join(", ") || "Not set"}</dd></div>
+            <div><dt>Contact phone</dt><dd>{contacts.filter((contact) => contact.contact_type === "phone").map((contact) => contact.value).join(", ") || "Not set"}</dd></div>
+            <div><dt>Trial date</dt><dd>{formatDate(trialLesson.trial_date)}</dd></div>
+            <div><dt>Trial time</dt><dd>{formatLessonTime(trialLesson.trial_time)}</dd></div>
+            <div><dt>School</dt><dd>{trialLesson.schools?.name || "Not set"}</dd></div>
+            <div><dt>Assigned teacher</dt><dd>{trialLesson.assigned_teacher?.full_name || trialLesson.assigned_teacher?.email || "Not set"}</dd></div>
+            <div><dt>Age group</dt><dd>{participants.map((participant) => participant.age_group?.label).filter(Boolean).join(", ") || "Not set"}</dd></div>
+            <div><dt>Course / level</dt><dd>{formatTrialLevel(trialLesson)}</dd></div>
+            <div><dt>Lesson type</dt><dd>{formatLessonType(trialLesson.lesson_type)}</dd></div>
+            <div><dt>Booking status</dt><dd>{trialLesson.status ? formatTrialStatus(trialLesson.status) : "Not set"}</dd></div>
+            <div><dt>Inquiry method</dt><dd>{prospect?.inquiry_methods?.label || "Not set"}</dd></div>
+            <div><dt>Acquisition source</dt><dd>{prospect?.acquisition_sources?.label || "Not set"}</dd></div>
+            <div><dt>Customer request</dt><dd className="preserve-lines">{trialLesson.customer_request || "Not set"}</dd></div>
+            <div><dt>Internal notes</dt><dd className="preserve-lines">{trialLesson.internal_notes || "Not set"}</dd></div>
+            <div><dt>Linked trial package</dt><dd>{packageLabel}</dd></div>
+            <div><dt>Participants / students</dt><dd>{participants.length ? (
+              <ul className="trial-lesson-participant-list">
+                {participants.map((participant) => (
+                  <li key={participant.id}>
+                    <strong>{formatParticipantName(participant)}</strong>
+                    {participant.furigana ? <span>Furigana: {participant.furigana}</span> : null}
+                    <span>Age group: {participant.age_group?.label || "Not set"}</span>
+                    <span>Requested course / level: {participant.requested_level?.label || "Not set"}</span>
+                    <span>Date of birth: {formatDate(participant.date_of_birth)}</span>
+                    <span>Age override: {participant.age_override ?? "Not set"}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : "Not set"}</dd></div>
+          </dl>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function TrialLessonRow({
   canCreateTrialPackage,
   confirmingId,
@@ -1772,6 +1929,7 @@ function TrialLessonRow({
   onCreateTrialPackage,
   onSelectionChange,
   onOpenComposer,
+  onViewDetails,
   onPhoneFollowUpComplete,
   onRequestDelete,
   packageActionId,
@@ -1781,6 +1939,7 @@ function TrialLessonRow({
 }) {
   const participant = getPrimaryParticipant(trialLesson);
   const prospect = trialLesson.prospects;
+  const rowNames = getTrialLessonRowNames(trialLesson);
   const conversionParticipants = trialLesson.trial_lesson_participants?.filter((item) => !item.converted_student_id) || [];
   const convertedParticipant = trialLesson.trial_lesson_participants?.find((item) => item.converted_student_id);
   const linkedStudentId = trialLesson.converted_student_id || convertedParticipant?.converted_student_id;
@@ -1820,8 +1979,10 @@ function TrialLessonRow({
       <td>{formatLessonTime(trialLesson.trial_time)}</td>
       <td>
         <div className="table-cell-stack">
-          <strong>{formatProspectName(prospect)}</strong>
-          <span>{participant ? formatParticipantName(participant) : "No participant"}</span>
+          <button className="trial-lesson-name-button" onClick={() => onViewDetails(trialLesson)} type="button">
+            <strong>{rowNames.primary}</strong>
+            {rowNames.secondary ? <span>{rowNames.secondary}</span> : null}
+          </button>
           <span>{[prospectEmail || "No email", prospectPhone || "No phone"].join(" / ")}</span>
         </div>
       </td>
@@ -1834,9 +1995,18 @@ function TrialLessonRow({
         <StatusBadge value={trialLesson.status || "unresolved"} />
         {trialLesson.status === "no_show" ? <FollowUpStatus trialLesson={trialLesson} /> : null}
       </td>
-      {mayManage ? (
-        <td>
-          <ActionToolbar className="trial-lesson-actions">
+      <td>
+        <ActionToolbar className="trial-lesson-actions">
+          <button
+            aria-label={`View details for ${rowNames.primary}`}
+            className="secondary-button button-with-icon"
+            onClick={() => onViewDetails(trialLesson)}
+            type="button"
+          >
+            <ActionIcon name="eye" /> View Details
+          </button>
+          {mayManage ? (
+            <>
             {linkedStudentId ? (
               <Link
                 aria-label="View student"
@@ -1929,9 +2099,10 @@ function TrialLessonRow({
             >
               <ActionIcon name="trash" />
             </button>
-          </ActionToolbar>
-        </td>
-      ) : null}
+            </>
+          ) : null}
+        </ActionToolbar>
+      </td>
     </tr>
   );
 }

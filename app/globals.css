@@ -1577,6 +1577,12 @@ dd {
   font-weight: 750;
 }
 
+.trial-package-linked-lesson-button {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+}
+
 .trial-package-lesson-actions {
   align-items: center;
   display: flex;
@@ -1643,6 +1649,53 @@ dd {
   flex-wrap: nowrap;
   gap: 6px;
   white-space: nowrap;
+}
+
+.trial-lesson-name-button {
+  background: none;
+  border: 0;
+  color: var(--blue-dark);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.table-cell-stack .trial-lesson-name-button span {
+  color: inherit;
+}
+
+.trial-lesson-name-button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.trial-lesson-details-modal {
+  max-width: 720px;
+}
+
+.trial-lesson-details-message {
+  margin: 18px;
+}
+
+.trial-lesson-details-list dd {
+  overflow-wrap: anywhere;
+}
+
+.trial-lesson-participant-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.trial-lesson-participant-list li {
+  display: grid;
+  gap: 3px;
 }
 
 .action-icon-button {

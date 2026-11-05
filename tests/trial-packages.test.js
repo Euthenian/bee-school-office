@@ -248,6 +248,11 @@ test("linked package lessons keep the original trial lesson authoritative", () =
   assert.match(trialPackageLinkMigrationSql, /else 'scheduled'/);
   assert.match(trialPackageLinkMigrationSql, /if v_lesson\.trial_lesson_id is not null then/);
   assert.match(trialLessonsPage, /Linked Trial Lesson:/);
+  assert.match(trialLessonsPage, /onViewDetails=\{openTrialLessonDetails\}/);
+  assert.match(trialLessonsPage, /onClick=\{\(\) => onViewDetails\(linkedTrialLesson\)\}/);
+  assert.match(trialLessonsPage, /<ActionIcon name="eye" \/> Linked Trial Lesson: <StatusBadge/);
+  assert.match(trialLessonsPage, /<ActionIcon name="calendar-clock" \/> Reschedule/);
+  assert.match(trialLessonsPage, /saving \? "Saving\.\.\." : isScheduling \? "Schedule" : "Save"/);
   assert.match(trialLessonsPage, /formatTrialPackageLessonSchedule\(lesson\) \|\| "Not scheduled"/);
   assert.match(trialLessonsPage, /linkedTrialLesson \? \(/);
 });
@@ -275,6 +280,8 @@ test("trial lessons page exposes package creation for unlinked group lessons and
   assert.match(dataSource, /\bprospect_id\b/);
   assert.match(trialLessonsPage, /fetchTrialPackages\(supabase, packageFilters\)/);
   assert.match(trialLessonsPage, /packageFilters = \{\s+search,/);
+  assert.match(trialLessonsPage, /trialLessonIds: linkedTrialLessonIds/);
+  assert.match(dataSource, /query = query\.in\("id", filters\.trialLessonIds\)/);
 });
 
 test("trial package select RLS permits insert-returning without broadening writes", () => {

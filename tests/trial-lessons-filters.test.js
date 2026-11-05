@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fetchTrialLessonDetails, fetchTrialLessons } from "../lib/data.js";
 import {
   buildTrialLessonColumnFilterOptions,
   defaultTrialLessonColumnFilters,
@@ -10,6 +11,7 @@ import {
   getMissingTrialLessonConversionFields,
   getNearestUpcomingTrialLesson,
   getTrialLessonPersonSearchValue,
+  getTrialLessonRowNames,
   hasActiveTrialLessonColumnFilters,
   hasActiveTrialLessonSort,
   resetTrialLessonTableFilters
@@ -174,6 +176,25 @@ test("trial lesson name sorting and contains filter use displayed prospect and p
   assert.deepEqual(filteredIds(rows, { nameSearch: "needle" }, { column: "name", direction: "asc" }), ["alpha"]);
 });
 
+test("trial lesson rows show one name for the same person and retain distinct contact and student names", () => {
+  const samePerson = trialLesson("same-person", {
+    prospects: { japanese_name: "西村 太郎", alphabet_name: "" },
+    trial_lesson_participants: [{ id: "same-person-participant", japanese_name: "西村太郎", alphabet_name: "Taro Nishimura" }]
+  });
+  assert.deepEqual(getTrialLessonRowNames(samePerson), { primary: "西村 太郎 (Taro Nishimura)", secondary: "" });
+
+  const contactAndStudent = trialLesson("different-people");
+  assert.deepEqual(getTrialLessonRowNames(contactAndStudent), {
+    primary: "Yamada Taro (Taro Yamada)",
+    secondary: "Yamada Hanako (Hanako Yamada)"
+  });
+
+  assert.deepEqual(getTrialLessonRowNames(trialLesson("no-participant", { trial_lesson_participants: [] })), {
+    primary: "Yamada Taro (Taro Yamada)",
+    secondary: ""
+  });
+});
+
 test("created trial lesson links initialize the editable search from the created prospect", () => {
   assert.equal(
     getTrialLessonPersonSearchValue(
@@ -262,9 +283,77 @@ test("trial lesson conversion details report only missing required fields", () =
 test("trial lesson column filters layer on fetched rows and leave actions unfiltered", () => {
   assert.match(trialLessonsPage, /filterAndSortTrialLessons\(state\.trialLessons/);
   assert.match(trialLessonsPage, /visibleTrialLessons\.map/);
-  assert.match(trialLessonsPage, /mayManage \? <th>Actions<\/th> : null/);
+  assert.match(trialLessonsPage, /<th>Actions<\/th>/);
+  assert.match(trialLessonsPage, /onViewDetails=\{openTrialLessonDetails\}/);
+  assert.match(trialLessonsPage, /View Details/);
   assert.match(trialLessonsPage, /const linkedStudentId = trialLesson\.converted_student_id \|\| convertedParticipant\?\.converted_student_id/);
   assert.match(trialLessonsPage, /aria-label="View student"/);
   assert.match(trialLessonsPage, /<ActionIcon name="eye" \/>/);
   assert.doesNotMatch(trialLessonsPage, /label="Actions"[\s\S]*ColumnFilterHeader/);
+});
+
+test("both trial lesson detail controls open the same read-only dialog", () => {
+  assert.match(trialLessonsPage, /className="trial-lesson-name-button" onClick=\{\(\) => onViewDetails\(trialLesson\)\}/);
+  assert.match(trialLessonsPage, /<strong>\{rowNames\.primary\}<\/strong>/);
+  assert.match(trialLessonsPage, /rowNames\.secondary \? <span>\{rowNames\.secondary\}<\/span> : null/);
+  assert.match(trialLessonsPage, /onClick=\{\(\) => onViewDetails\(trialLesson\)\}[\s\S]*?<ActionIcon name="eye" \/> View Details/);
+  assert.match(trialLessonsPage, /aria-modal="true" className="communication-modal trial-lesson-details-modal"/);
+  assert.match(trialLessonsPage, /customer_request/);
+  assert.match(trialLessonsPage, /internal_notes/);
+});
+
+test("trial lesson details fetch the selected stored booking and linked package", async () => {
+  const requests = [];
+  const booking = { id: "selected-trial", customer_request: "Please call first" };
+  const packageLesson = { lesson_number: 2, trial_packages: { id: "package-1", total_lessons: 4 } };
+  const supabase = {
+    from(table) {
+      const request = { table, filters: [] };
+      requests.push(request);
+      return {
+        select(selection) { request.selection = selection; return this; },
+        order() { return this; },
+        limit() { return this; },
+        eq(column, value) { request.filters.push([column, value]); return this; },
+        maybeSingle() { return Promise.resolve({ data: packageLesson, error: null }); },
+        then(resolve, reject) { return Promise.resolve({ data: [booking], error: null }).then(resolve, reject); }
+      };
+    }
+  };
+
+  const result = await fetchTrialLessonDetails(supabase, booking.id);
+  assert.equal(result.data, booking);
+  assert.equal(result.linkedPackage, packageLesson);
+  assert.equal(result.error, null);
+  assert.deepEqual(requests.map(({ table, filters }) => [table, filters]), [
+    ["trial_lessons", [["id", booking.id]]],
+    ["trial_package_lessons", [["trial_lesson_id", booking.id]]]
+  ]);
+});
+
+test("linked package lesson lookup applies booking filters to exact IDs", async () => {
+  const filters = [];
+  const booking = { id: "linked-trial", prospects: { japanese_name: "Nishimura" } };
+  const query = {
+    select() { return this; },
+    order() { return this; },
+    limit() { return this; },
+    eq(column, value) { filters.push(["eq", column, value]); return this; },
+    in(column, values) { filters.push(["in", column, values]); return this; },
+    then(resolve, reject) { return Promise.resolve({ data: [booking], error: null }).then(resolve, reject); }
+  };
+  const supabase = { from(table) { assert.equal(table, "trial_lessons"); return query; } };
+
+  const result = await fetchTrialLessons(supabase, {
+    schoolId: "school-a",
+    status: "booked",
+    trialLessonIds: [booking.id]
+  });
+
+  assert.deepEqual(result.data, [booking]);
+  assert.deepEqual(filters, [
+    ["eq", "status", "booked"],
+    ["eq", "school_id", "school-a"],
+    ["in", "id", [booking.id]]
+  ]);
 });

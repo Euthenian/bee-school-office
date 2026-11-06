@@ -38,7 +38,9 @@ order by teacher, rb.id;
 
 -- Preconditions: the class still has exactly the audited membership.
 select
-  (select count(*) from public.classes where id = :'target_class' and assigned_teacher_staff_id is null) = 1 as target_unlabelled,
+  (select count(*) from public.classes where id = :'target_class' and status = 'active'
+     and assigned_teacher_staff_id is null) = 1 as target_unlabelled,
+  (select count(*) from repair_before) = :expected_move + :expected_stay as membership_count_ok,
   (select count(*) from repair_before where status in ('active','pending','paused')
      and assigned_teacher_staff_id = :'move_teacher') = :expected_move as move_count_ok,
   (select count(*) from repair_before where status in ('active','pending','paused')
@@ -47,7 +49,14 @@ select
      and assigned_teacher_staff_id is distinct from :'move_teacher'
      and assigned_teacher_staff_id is distinct from :'stay_teacher') = 0 as no_other_teachers,
   (select array_agg(id order by id) from repair_before where assigned_teacher_staff_id = :'move_teacher')
-    = (select array_agg(id order by id) from unnest(array[:move_enrollments]::uuid[]) id) as move_ids_ok
+    = (select array_agg(id order by id) from unnest(array[:move_enrollments]::uuid[]) id) as move_ids_ok,
+  public.has_active_staff_teacher_staff_assignment(
+    (select school_id from public.classes where id = :'target_class'), :'move_teacher') as move_teacher_eligible,
+  public.has_active_staff_teacher_staff_assignment(
+    (select school_id from public.classes where id = :'target_class'), :'stay_teacher') as stay_teacher_eligible,
+  not exists (select 1 from public.classes c join public.classes t on t.id = :'target_class'
+    where c.school_id = t.school_id and c.lesson_day = t.lesson_day and c.lesson_time = t.lesson_time
+      and c.assigned_teacher_staff_id in (:'move_teacher', :'stay_teacher')) as no_existing_teacher_classes
 \gset pre_
 
 \if :pre_target_unlabelled
@@ -80,12 +89,36 @@ select
   rollback;
   \quit
 \endif
+\if :pre_membership_count_ok
+\else
+  \echo ABORT: class has an unexpected enrollment or status
+  rollback;
+  \quit
+\endif
+\if :pre_move_teacher_eligible
+\else
+  \echo ABORT: moving teacher is not eligible at this school
+  rollback;
+  \quit
+\endif
+\if :pre_stay_teacher_eligible
+\else
+  \echo ABORT: staying teacher is not eligible at this school
+  rollback;
+  \quit
+\endif
+\if :pre_no_existing_teacher_classes
+\else
+  \echo ABORT: a teacher-specific class already exists at this slot
+  rollback;
+  \quit
+\endif
 
--- 1. Reuse or create the moving teacher's class at the same school/day/time.
+-- 1. Create the moving teacher's class at the same school/day/time.
+-- The unique index aborts the transaction if another session creates it first.
 insert into public.classes (organization_id, school_id, lesson_day, lesson_time, status, assigned_teacher_staff_id)
 select c.organization_id, c.school_id, c.lesson_day, c.lesson_time, 'active', :'move_teacher'
 from public.classes c where c.id = :'target_class'
-on conflict (school_id, lesson_day, lesson_time, assigned_teacher_staff_id) do update set status = 'active'
 returning id as new_class_id
 \gset
 
@@ -122,6 +155,30 @@ select
   (select count(*) from public.classes c join public.student_enrollments se on se.class_id = c.id
      where c.id in (:'target_class', :'new_class_id') and se.status in ('active','pending','paused')
        and se.assigned_teacher_staff_id is distinct from c.assigned_teacher_staff_id) = 0 as class_teachers_consistent;
+
+-- A failed invariant must abort before :finish can commit.
+select
+  (select count(*) from public.student_enrollments se join repair_before rb using (id)
+     where (se.student_id, se.assigned_teacher_staff_id, se.assigned_teacher_profile_id, se.status, se.level, se.start_date, se.end_date)
+       is distinct from (rb.student_id, rb.assigned_teacher_staff_id, rb.assigned_teacher_profile_id, rb.status, rb.level, rb.start_date, rb.end_date)) = 0
+  and not exists (select * from public.student_billing_profiles where student_id in (select student_id from repair_before)
+                  except select * from billing_before)
+  and not exists (select * from billing_before
+                  except select * from public.student_billing_profiles where student_id in (select student_id from repair_before))
+  and (select count(*) from public.student_enrollments where id in (select id from repair_before)) = (select count(*) from repair_before)
+  and (select count(*) from public.student_enrollments where class_id = :'new_class_id') = :expected_move
+  and (select count(*) from public.student_enrollments where class_id = :'target_class') = :expected_stay
+  and (select count(*) from public.classes c join public.student_enrollments se on se.class_id = c.id
+       where c.id in (:'target_class', :'new_class_id')
+         and se.assigned_teacher_staff_id is distinct from c.assigned_teacher_staff_id) = 0
+  as safe_to_finish
+\gset post_
+\if :post_safe_to_finish
+\else
+  \echo ABORT: post-repair enrollment, teacher, or billing invariant failed
+  rollback;
+  \quit
+\endif
 
 :finish;
 \echo finished with :finish

@@ -40,6 +40,8 @@ where c.id = :'target_class';
 \echo == preconditions (all must be t)
 select
   (select count(*) = 1 from public.classes where id = :'target_class' and status = 'active') as target_active,
+  (select count(*) from public.student_enrollments where class_id = :'target_class')
+    = :expected_move + :expected_stay as membership_count_ok,
   (select count(*) from public.student_enrollments where class_id = :'target_class' and status in ('active','pending','paused')
      and assigned_teacher_staff_id = :'move_teacher') = :expected_move as move_count_ok,
   (select count(*) from public.student_enrollments where class_id = :'target_class' and status in ('active','pending','paused')
@@ -59,6 +61,9 @@ select
 \echo == post-migration checks (all must be t)
 select
   (select assigned_teacher_staff_id is null from public.classes where id = :'target_class') as target_unlabelled,
+  not exists (select 1 from public.classes c join public.classes t on t.id = :'target_class'
+    where c.school_id = t.school_id and c.lesson_day = t.lesson_day and c.lesson_time = t.lesson_time
+      and c.assigned_teacher_staff_id = :'move_teacher') as no_existing_move_teacher_class,
   not exists (select 1 from public.classes c join public.classes t on t.id = :'target_class'
     where c.school_id = t.school_id and c.lesson_day = t.lesson_day and c.lesson_time = t.lesson_time
       and c.assigned_teacher_staff_id = :'stay_teacher') as no_existing_stay_teacher_class;

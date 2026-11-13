@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { getTrialBookingConversionErrors } from "../lib/trial-booking-conversion-validation.js";
 import {
   buildPendingTrialBookingImport,
   getPendingTrialBookingImportDeduplicationKey,
@@ -189,7 +190,7 @@ test("pending booking review isolates conversion required selects from save corr
   );
   const saveFormEnd = pendingTrialBookingReviewPage.indexOf("</form>", saveFormStart);
   const conversionFormStart = pendingTrialBookingReviewPage.indexOf(
-    '<form className="student-form" onSubmit={handleConvertSubmit}>'
+    '<form className="student-form trial-booking-conversion-form" noValidate onSubmit={handleConvertSubmit}>'
   );
   const conversionPanelStart = pendingTrialBookingReviewPage.indexOf("<ConversionPanel", conversionFormStart);
 
@@ -200,7 +201,7 @@ test("pending booking review isolates conversion required selects from save corr
   assert.equal(pendingTrialBookingReviewPage.slice(saveFormStart, saveFormEnd).includes("conversionForm.levelId"), false);
   assert.match(
     pendingTrialBookingReviewPage,
-    /<select onChange=\{\(event\) => onUpdate\("levelId", event\.target\.value\)\} required value=\{conversionForm\.levelId\}>/
+    /aria-invalid=\{Boolean\(conversionErrors\.levelId\)\} name="levelId" onChange=\{\(event\) => onUpdate\("levelId", event\.target\.value\)\} required value=\{conversionForm\.levelId\}>/
   );
   assert.match(pendingTrialBookingReviewPage, /levelId: ""/);
   assert.match(
@@ -209,6 +210,32 @@ test("pending booking review isolates conversion required selects from save corr
   );
   assert.match(
     pendingTrialBookingReviewPage,
-    /<button className="convert-button" disabled=\{!canAttemptConversion \|\| converting\} type="submit">/
+    /<button className="convert-button" disabled=\{converting\} type="submit">/
   );
+  assert.match(pendingTrialBookingReviewPage, /event\.currentTarget\.querySelector\(`\[name="\$\{name\}"\]`\)\?\.focus\(\)/);
+  assert.match(pendingTrialBookingReviewPage, /conversionErrors\.levelId \? <span className="form-error" id="conversion-level-error" role="alert">/);
+  assert.match(pendingTrialBookingReviewPage, /setConversionErrors\(\(current\) => \(\{ \.\.\.current, \[field === "prospectId" \? "prospectChoice" : field\]: "" \}\)\)/);
+});
+
+test("trial booking conversion identifies every missing field and accepts either prospect choice", () => {
+  const complete = {
+    trialDate: "2026-11-13",
+    trialTime: "18:00",
+    lessonType: "group",
+    levelId: "level-1",
+    prospectChoice: "new",
+    prospectId: ""
+  };
+  assert.deepEqual(getTrialBookingConversionErrors(complete), {});
+  assert.deepEqual(getTrialBookingConversionErrors({ ...complete, levelId: "" }), {
+    levelId: "Please select a level."
+  });
+  assert.deepEqual(getTrialBookingConversionErrors({ ...complete, prospectChoice: "existing", prospectId: "prospect-1" }), {});
+  assert.deepEqual(getTrialBookingConversionErrors({ ...complete, trialDate: "", trialTime: "", lessonType: "", levelId: "", prospectChoice: "" }), {
+    trialDate: "Please select a trial date.",
+    trialTime: "Please select a trial time.",
+    lessonType: "Please select a lesson type.",
+    levelId: "Please select a level.",
+    prospectChoice: "Please select an existing prospect or create a new prospect."
+  });
 });

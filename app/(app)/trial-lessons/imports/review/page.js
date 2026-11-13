@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { EmptyState } from "@/components/EmptyState";
@@ -20,6 +20,7 @@ import {
 import { formatDateTime } from "@/lib/format";
 import { canManageTrialLessons } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
+import { getTrialBookingConversionErrors } from "@/lib/trial-booking-conversion-validation";
 
 const emptyForm = {
   student_name: "",
@@ -61,6 +62,7 @@ function PendingTrialBookingReviewContent() {
   const pendingImportId = searchParams.get("id") || "";
   const [classLevels, setClassLevels] = useState([]);
   const [conversionForm, setConversionForm] = useState(emptyConversionForm);
+  const [conversionErrors, setConversionErrors] = useState({});
   const [conversionResult, setConversionResult] = useState(null);
   const [converting, setConverting] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -114,6 +116,7 @@ function PendingTrialBookingReviewContent() {
       });
       setForm(createFormState(pendingResult.data));
       setConversionForm(createConversionFormState(pendingResult.data, candidates));
+      setConversionErrors({});
       setConversionResult(null);
     }
 
@@ -126,22 +129,6 @@ function PendingTrialBookingReviewContent() {
 
   const pendingImport = state.pendingImport;
   const alreadyConverted = Boolean(pendingImport?.converted_trial_lesson_id);
-  const canAttemptConversion = useMemo(
-    () =>
-      Boolean(
-        pendingImport &&
-          !alreadyConverted &&
-          pendingImport.review_status === "reviewed" &&
-          pendingImport.parse_status === "parsed" &&
-          conversionForm.trialDate &&
-          conversionForm.trialTime &&
-          conversionForm.lessonType &&
-          conversionForm.levelId &&
-          (conversionForm.prospectChoice === "new" || conversionForm.prospectId)
-      ),
-    [alreadyConverted, conversionForm, pendingImport]
-  );
-
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
   }
@@ -153,6 +140,9 @@ function PendingTrialBookingReviewContent() {
       ...(field === "prospectChoice" && value === "new" ? { prospectId: "" } : {}),
       ...(field === "prospectId" ? { prospectChoice: "existing" } : {})
     }));
+    if (value) {
+      setConversionErrors((current) => ({ ...current, [field === "prospectId" ? "prospectChoice" : field]: "" }));
+    }
     if (field === "trialDate") {
       setForm((current) => ({ ...current, set_date: value }));
     }
@@ -164,6 +154,11 @@ function PendingTrialBookingReviewContent() {
   function applyPreferredSchedule(date, time) {
     setForm((current) => ({ ...current, set_date: date || "", set_time: time || "" }));
     setConversionForm((current) => ({ ...current, trialDate: date || "", trialTime: time || "" }));
+    setConversionErrors((current) => ({
+      ...current,
+      ...(date ? { trialDate: "" } : {}),
+      ...(time ? { trialTime: "" } : {})
+    }));
   }
 
   async function reloadPendingImport(supabase, successMessage, result = null) {
@@ -187,6 +182,7 @@ function PendingTrialBookingReviewContent() {
       assignedTeacherProfileId: current.assignedTeacherProfileId
     }));
     setConversionResult(result);
+    setConversionErrors({});
   }
 
   async function handleSubmit(event) {
@@ -253,7 +249,15 @@ function PendingTrialBookingReviewContent() {
 
   function handleConvertSubmit(event) {
     event.preventDefault();
-    if (!canAttemptConversion || converting) {
+    if (converting || alreadyConverted || pendingImport?.review_status !== "reviewed" || pendingImport?.parse_status !== "parsed") {
+      return;
+    }
+    const errors = getTrialBookingConversionErrors(conversionForm);
+    setConversionErrors(errors);
+    const firstInvalid = ["levelId", "trialDate", "trialTime", "lessonType", "prospectChoice"].find((field) => errors[field]);
+    if (firstInvalid) {
+      const name = firstInvalid === "prospectChoice" ? "prospect-choice" : firstInvalid;
+      event.currentTarget.querySelector(`[name="${name}"]`)?.focus();
       return;
     }
     handleConvert();
@@ -447,11 +451,11 @@ function PendingTrialBookingReviewContent() {
         </DataSurface>
       </form>
 
-      <form className="student-form" onSubmit={handleConvertSubmit}>
+      <form className="student-form trial-booking-conversion-form" noValidate onSubmit={handleConvertSubmit}>
         <ConversionPanel
           alreadyConverted={alreadyConverted}
-          canAttemptConversion={canAttemptConversion}
           classLevels={classLevels}
+          conversionErrors={conversionErrors}
           conversionForm={conversionForm}
           conversionResult={conversionResult}
           converting={converting}
@@ -499,8 +503,8 @@ function PendingTrialBookingReviewContent() {
 
 function ConversionPanel({
   alreadyConverted,
-  canAttemptConversion,
   classLevels,
+  conversionErrors,
   conversionForm,
   conversionResult,
   converting,
@@ -547,15 +551,17 @@ function ConversionPanel({
           <div className="form-grid">
             <label>
               Set Date
-              <input onChange={(event) => onUpdate("trialDate", event.target.value)} required type="date" value={conversionForm.trialDate} />
+              <input aria-describedby={conversionErrors.trialDate ? "conversion-trial-date-error" : undefined} aria-invalid={Boolean(conversionErrors.trialDate)} name="trialDate" onChange={(event) => onUpdate("trialDate", event.target.value)} required type="date" value={conversionForm.trialDate} />
+              {conversionErrors.trialDate ? <span className="form-error" id="conversion-trial-date-error" role="alert">{conversionErrors.trialDate}</span> : null}
             </label>
             <label>
               Set Time
-              <input onChange={(event) => onUpdate("trialTime", event.target.value)} required type="time" value={conversionForm.trialTime} />
+              <input aria-describedby={conversionErrors.trialTime ? "conversion-trial-time-error" : undefined} aria-invalid={Boolean(conversionErrors.trialTime)} name="trialTime" onChange={(event) => onUpdate("trialTime", event.target.value)} required type="time" value={conversionForm.trialTime} />
+              {conversionErrors.trialTime ? <span className="form-error" id="conversion-trial-time-error" role="alert">{conversionErrors.trialTime}</span> : null}
             </label>
             <label>
               Lesson type
-              <select onChange={(event) => onUpdate("lessonType", event.target.value)} required value={conversionForm.lessonType}>
+              <select aria-describedby={conversionErrors.lessonType ? "conversion-lesson-type-error" : undefined} aria-invalid={Boolean(conversionErrors.lessonType)} name="lessonType" onChange={(event) => onUpdate("lessonType", event.target.value)} required value={conversionForm.lessonType}>
                 <option value="">Select lesson type</option>
                 {lessonTypes.map((type) => (
                   <option key={type.value} value={type.value}>
@@ -563,10 +569,11 @@ function ConversionPanel({
                   </option>
                 ))}
               </select>
+              {conversionErrors.lessonType ? <span className="form-error" id="conversion-lesson-type-error" role="alert">{conversionErrors.lessonType}</span> : null}
             </label>
             <label>
               Level
-              <select onChange={(event) => onUpdate("levelId", event.target.value)} required value={conversionForm.levelId}>
+              <select aria-describedby={conversionErrors.levelId ? "conversion-level-error" : undefined} aria-invalid={Boolean(conversionErrors.levelId)} name="levelId" onChange={(event) => onUpdate("levelId", event.target.value)} required value={conversionForm.levelId}>
                 <option value="">Select a level</option>
                 {classLevels.map((level) => (
                   <option key={level.id} value={level.id}>
@@ -574,6 +581,7 @@ function ConversionPanel({
                   </option>
                 ))}
               </select>
+              {conversionErrors.levelId ? <span className="form-error" id="conversion-level-error" role="alert">{conversionErrors.levelId}</span> : null}
             </label>
           </div>
 
@@ -611,6 +619,7 @@ function ConversionPanel({
 
           <ProspectChoice
             conversionForm={conversionForm}
+            error={conversionErrors.prospectChoice}
             onUpdate={onUpdate}
             pendingImport={pendingImport}
             prospectCandidates={prospectCandidates}
@@ -623,7 +632,7 @@ function ConversionPanel({
           ) : null}
 
           <div className="form-actions conversion-actions">
-            <button className="convert-button" disabled={!canAttemptConversion || converting} type="submit">
+            <button className="convert-button" disabled={converting} type="submit">
               {converting ? "Creating..." : "Create Trial Lesson"}
             </button>
           </div>
@@ -633,9 +642,9 @@ function ConversionPanel({
   );
 }
 
-function ProspectChoice({ conversionForm, onUpdate, pendingImport, prospectCandidates }) {
+function ProspectChoice({ conversionForm, error, onUpdate, pendingImport, prospectCandidates }) {
   return (
-    <div className="stack-list">
+    <div className={`stack-list${error ? " prospect-choice-error" : ""}`}>
       <article className="list-card">
         <strong>Prospect choice</strong>
         <span>
@@ -649,6 +658,7 @@ function ProspectChoice({ conversionForm, onUpdate, pendingImport, prospectCandi
         <label className="list-card prospect-choice-card" key={candidate.id}>
           <span className="primary-check">
             <input
+              aria-describedby={error ? "conversion-prospect-error" : undefined}
               checked={conversionForm.prospectId === candidate.id}
               name="prospect-choice"
               onChange={() => onUpdate("prospectId", candidate.id)}
@@ -665,6 +675,7 @@ function ProspectChoice({ conversionForm, onUpdate, pendingImport, prospectCandi
       <label className="list-card prospect-choice-card">
         <span className="primary-check">
           <input
+            aria-describedby={error ? "conversion-prospect-error" : undefined}
             checked={conversionForm.prospectChoice === "new"}
             name="prospect-choice"
             onChange={() => onUpdate("prospectChoice", "new")}
@@ -675,6 +686,7 @@ function ProspectChoice({ conversionForm, onUpdate, pendingImport, prospectCandi
         <strong>{pendingImport.student_name || "New prospect"}</strong>
         <span>Imported email and phone will be added as prospect contacts if present.</span>
       </label>
+      {error ? <p className="form-error" id="conversion-prospect-error" role="alert">{error}</p> : null}
     </div>
   );
 }

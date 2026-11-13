@@ -1486,6 +1486,22 @@ dd {
   cursor: pointer;
 }
 
+.trial-booking-conversion-form :is(input, select)[aria-invalid="true"],
+.trial-booking-conversion-form .prospect-choice-error .prospect-choice-card {
+  border-color: var(--danger);
+}
+
+.trial-booking-conversion-form :is(
+  input[name="trialDate"],
+  input[name="trialTime"],
+  select[name="lessonType"],
+  select[name="levelId"],
+  input[name="prospect-choice"]
+) {
+  scroll-margin-top: 9rem;
+  scroll-margin-bottom: 5rem;
+}
+
 .candidate-differences {
   display: grid;
   gap: 4px;

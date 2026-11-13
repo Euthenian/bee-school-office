@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   buildCommunicationDraft,
+  buildTrialLessonCommunicationContext,
   communicationMessageTypes,
+  communicationTemplates,
   renderTemplate
 } from "../lib/communication-templates.js";
 import {
@@ -26,6 +28,10 @@ const communicationsUseResendOutboundSql = readFileSync(
   new URL("../supabase/migrations/20260909005000_communications_use_resend_outbound.sql", import.meta.url),
   "utf8"
 );
+const japaneseTrialConfirmationSql = readFileSync(
+  new URL("../supabase/migrations/20261113001000_trial_lesson_confirmation_japanese.sql", import.meta.url),
+  "utf8"
+);
 const communicationsWorkerSource = readFileSync(new URL("../lib/communications-worker.js", import.meta.url), "utf8");
 const communicationsPage = readFileSync(new URL("../app/(app)/communications/page.js", import.meta.url), "utf8");
 const studentProfilePage = readFileSync(new URL("../app/(app)/students/profile/page.js", import.meta.url), "utf8");
@@ -40,15 +46,27 @@ const gmailTrialBookingWorkerSource = readFileSync(
 );
 
 test("communication template registry renders trial confirmation variables", () => {
-  const draft = buildCommunicationDraft("trial_lesson_confirmation", {
-    confirmed_date: "27 Aug 2026",
-    confirmed_time: "16:30",
-    lesson_type: "Group",
-    recipient_name: "Parent Example",
-    school_name: "Ohashi",
-    student_name: "Student Example",
-    teacher: "Teacher Example"
+  const context = buildTrialLessonCommunicationContext({
+    trial_date: "2026-11-14",
+    trial_time: "14:00:00",
+    prospects: { japanese_name: "岩尾保護者", alphabet_name: "Iwao Parent" },
+    trial_lesson_participants: [{ japanese_name: "岩尾日菜子", alphabet_name: "Hinako Iwao" }],
+    class_levels: { label: "Adult" },
+    booking_import: [{ course: "大人英会話" }]
   });
+  const draft = buildCommunicationDraft("trial_lesson_confirmation", context);
+  const expectedBody = `岩尾日菜子様
+
+この度は体験レッスンにお申し込みいただき、ありがとうございます。
+
+11月14日（土）14:00～にて、大人英会話の体験レッスンをご予約いたしました。
+
+当日、お待ちしております。
+どうぞお気をつけてお越しくださいませ。
+
+よろしくお願いいたします。
+
+BEE SCHOOL`;
 
   assert.deepEqual(
     communicationMessageTypes.map((type) => type.value),
@@ -64,10 +82,32 @@ test("communication template registry renders trial confirmation variables", () 
     ]
   );
   assert.equal(draft.templateKey, "trial_lesson_confirmation");
-  assert.match(draft.subject, /27 Aug 2026 16:30/);
-  assert.match(draft.body, /Student Example/);
-  assert.match(draft.body, /Teacher Example/);
+  assert.equal(draft.subject, "【BEE SCHOOL】体験レッスンご予約確認");
+  assert.equal(draft.body, expectedBody);
+  assert.equal(context.recipient_name, "岩尾保護者 (Iwao Parent)");
+  assert.doesNotMatch(draft.body, /Hinako Iwao|No teacher assigned|Adult/);
   assert.equal(renderTemplate("Hello {{ name }}", { name: "Bee" }), "Hello Bee");
+
+  const variant = buildCommunicationDraft("trial_lesson_confirmation", buildTrialLessonCommunicationContext({
+    trial_date: "2027-01-01",
+    trial_time: "09:05:00",
+    prospects: { japanese_name: "佐藤保護者" },
+    trial_lesson_participants: [{ japanese_name: "佐藤花子" }],
+    class_levels: { label: "子ども英会話" }
+  }));
+  assert.match(variant.body, /^佐藤花子様/);
+  assert.match(variant.body, /1月1日（金）09:05～にて、子ども英会話の体験レッスン/);
+
+  const storedSubject = japaneseTrialConfirmationSql.match(/set subject_template = '([^']+)'/)?.[1];
+  const storedBody = japaneseTrialConfirmationSql.match(/body_template = '([^']+)'/)?.[1];
+  assert.equal(storedSubject, communicationTemplates.trial_lesson_confirmation.subject);
+  assert.equal(storedBody, communicationTemplates.trial_lesson_confirmation.body);
+  assert.equal(renderTemplate(storedBody, context), expectedBody);
+  assert.match(japaneseTrialConfirmationSql, /where template_key = 'trial_lesson_confirmation'/);
+  assert.match(japaneseTrialConfirmationSql, /public\.pending_trial_booking_imports pbi/);
+  assert.match(japaneseTrialConfirmationSql, /public\.class_levels cl/);
+  assert.match(japaneseTrialConfirmationSql, /extract\(isodow from v_trial\.trial_date\)/);
+  assert.match(japaneseTrialConfirmationSql, /'confirmed_time', to_char\(v_trial\.trial_time, 'HH24:MI'\)/);
 });
 
 test("communications migration creates tenant-safe logs, idempotent actions, RLS, and follow-up state", () => {

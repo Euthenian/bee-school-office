@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { DataSurface, ResponsiveTable } from "@/components/Surface";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchCommunications } from "@/lib/data";
+import { getEmailHistoryPreview } from "@/lib/communication-history";
 import { formatDateTime, humanize } from "@/lib/format";
 import { canManageBilling, canManageCommunications } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
@@ -36,6 +37,7 @@ function CommunicationsContent() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [sendNotice, setSendNotice] = useState("");
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [viewedEmail, setViewedEmail] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -134,6 +136,7 @@ function CommunicationsContent() {
                   <th>Subject</th>
                   <th>Source</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -147,6 +150,13 @@ function CommunicationsContent() {
                     <td>
                       <StatusBadge value={communication.delivery_status} />
                     </td>
+                    <td>
+                      {communication.channel === "email" ? (
+                        <button className="secondary-button" onClick={() => setViewedEmail(communication)} type="button">
+                          View email
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -156,7 +166,33 @@ function CommunicationsContent() {
           <EmptyState title="No communication history" description="Messages queued or sent from Bee School Office will appear here." />
         )}
       </DataSurface>
+      {viewedEmail ? <EmailHistoryDialog communication={viewedEmail} onClose={() => setViewedEmail(null)} /> : null}
     </>
+  );
+}
+
+function EmailHistoryDialog({ communication, onClose }) {
+  const preview = getEmailHistoryPreview(communication);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section aria-labelledby="email-history-title" aria-modal="true" className="communication-modal" onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }} role="dialog">
+        <header className="communication-modal-header">
+          <h2 id="email-history-title">Email details</h2>
+          <button autoFocus className="secondary-button" onClick={onClose} type="button">Close</button>
+        </header>
+        <div className="communication-preview">
+          <p><strong>To:</strong> {preview.to}</p>
+          <p><strong>Subject:</strong> {preview.subject}</p>
+          <p><strong>Date:</strong> {formatDateTime(preview.date)}</p>
+          <p><strong>Status:</strong> {preview.status}</p>
+          <h3>Message</h3>
+          <div className="communication-preview-body" style={{ overflowWrap: "anywhere" }}>{preview.body}</div>
+        </div>
+      </section>
+    </div>
   );
 }
 

@@ -12,7 +12,7 @@ import {
   getAiEigoInvitationActionLabel,
   getStudentInvitationRecipient
 } from "../lib/ai-eigo-invitations.js";
-import { createSupabaseRestCommunicationsRepository, processQueuedCommunicationActions } from "../lib/communications-worker.js";
+import { createResendSenderClient, createSupabaseRestCommunicationsRepository, processQueuedCommunicationActions, renderAiEigoInvitationHtml } from "../lib/communications-worker.js";
 import {
   sendAiEigoStudentInvitation,
   studentAiEigoInvitationSelect,
@@ -38,13 +38,21 @@ const aiEigoResendProviderSql = readFileSync(
   new URL("../supabase/migrations/20260831002000_ai_eigo_invitation_resend_provider.sql", import.meta.url),
   "utf8"
 );
+const japaneseInvitationSql = readFileSync(
+  new URL("../supabase/migrations/20261116001000_ai_eigo_invitation_japanese_html.sql", import.meta.url),
+  "utf8"
+);
+const refinedInvitationSql = readFileSync(
+  new URL("../supabase/migrations/20261116002000_ai_eigo_invitation_copy_refinement.sql", import.meta.url),
+  "utf8"
+);
 const aiEigoInvitationSql = `${aiEigoBaseInvitationSql}\n${aiEigoClaimIdempotencySql}\n${aiEigoPgcryptoQualificationSql}\n${aiEigoResendProviderSql}`;
 const latestSendSql =
-  aiEigoResendProviderSql.match(
+  japaneseInvitationSql.match(
     /create or replace function public\.send_ai_eigo_student_invitation_mvp[\s\S]*?grant execute on function public\.send_ai_eigo_student_invitation_mvp\(uuid\) to authenticated;/
   )?.[0] || aiEigoBaseInvitationSql;
 const latestPrepareSql = extractMigrationFunctionSql(
-  aiEigoPgcryptoQualificationSql,
+  refinedInvitationSql,
   "prepare_ai_eigo_student_invitation_email_mvp",
   "uuid"
 );
@@ -177,6 +185,46 @@ test("send invitation RPC queues the existing Resend integration and returns the
   assert.doesNotMatch(actionPayload, /https:\/\/ai-eigo\.com|v_raw_token|token_hash|invitation_link/i);
 });
 
+test("latest invitation migration keeps the subject and uses the exact Japanese copy in template and preparation RPC", () => {
+  assert.match(japaneseInvitationSql, /set subject_template = '【Bee School】AI-EIGO Voice Check ご利用のご案内'/);
+  assert.match(refinedInvitationSql, /set subject_template = '【Bee School】AI-EIGO Voice Check ご利用のご案内'/);
+  for (const line of [
+    "Bee Schoolの生徒・保護者の皆さまへ",
+    "Bee Schoolに通う生徒の皆さまは、特典としてAI-EIGOの「Voice Check（発音チェック）」機能を無料でご利用いただけます。",
+    "以下のボタンからAI-EIGOにアクセスし、ログインまたは新規登録をお願いいたします。",
+    "[CTA: 利用を開始する]",
+    "ボタンが開かない場合は、以下のURLをコピーしてブラウザに貼り付けてください。",
+    "このご案内リンクはお送りした方専用です。他の方への転送はお控えください。",
+    "このリンクは送信後14日間有効です。",
+    "Bee School"
+  ]) {
+    assert.ok(refinedInvitationSql.includes(line));
+    assert.ok(latestPrepareSql.includes(line));
+  }
+  const sampleUrl = "https://ai-eigo.com/invite/example-token";
+  const templateBody = refinedInvitationSql.match(/body_template = '([\s\S]*?)',\s*variable_keys/)?.[1];
+  const bodyArray = latestPrepareSql.match(/v_body = array_to_string\(ARRAY\[([\s\S]*?)\], E'\\n'\);/)?.[1];
+  assert.ok(templateBody);
+  assert.ok(bodyArray);
+  assert.equal(templateBody.replace(/\r\n/g, "\n"), expectedInvitationBody("{{invitation_link}}"));
+  const preparedBody = bodyArray.split(/\r?\n/)
+    .map((line) => line.trim().replace(/,$/, ""))
+    .filter(Boolean)
+    .map((line) => line === "v_link" ? sampleUrl : line.slice(1, -1).replaceAll("''", "'"))
+    .join("\n");
+  assert.equal(preparedBody, expectedInvitationBody(sampleUrl));
+  assert.match(latestPrepareSql, /returns table \(\s*recipient text,\s*subject text,\s*body text\s*\)/);
+  assert.match(latestPrepareSql, /v_subject = '【Bee School】AI-EIGO Voice Check ご利用のご案内'/);
+  assert.match(latestPrepareSql, /v_body = array_to_string\(ARRAY\[/);
+  assert.doesNotMatch(latestPrepareSql, /render_text_template\(v_template\.(subject|body)_template/);
+  assert.doesNotMatch(refinedInvitationSql, /create or replace function public\.send_ai_eigo_student_invitation_mvp/);
+  const previousPrepareSql = extractMigrationFunctionSql(japaneseInvitationSql, "prepare_ai_eigo_student_invitation_email_mvp", "uuid");
+  const withoutMessage = (sql) => sql.replace(/v_body = array_to_string\(ARRAY\[[\s\S]*?\], E'\\n'\);/, "v_body = MESSAGE;");
+  assert.equal(withoutMessage(latestPrepareSql), withoutMessage(previousPrepareSql));
+  assert.match(latestSendSql, /'AI-EIGO Voice Checkのご案内を送信待ちです。'/);
+  assert.doesNotMatch(latestSendSql, /Secure AI-EIGO invitation queued for delivery/);
+});
+
 test("communications worker prepares AI-EIGO invitation email just in time and uses Resend sender", async () => {
   const emails = [];
   const records = [];
@@ -227,8 +275,8 @@ test("communications worker prepares AI-EIGO invitation email just in time and u
         prepared.push(invitationId);
         return {
           recipient: "student@example.com",
-          subject: "Bee School AI-EIGO access invitation",
-          body: "Please use https://ai-eigo.com/invite/secure-token"
+          subject: "【Bee School】AI-EIGO Voice Check ご利用のご案内",
+          body: expectedInvitationBody("https://ai-eigo.com/invite/secure-token")
         };
       },
       async recordActionResult(row) {
@@ -241,11 +289,102 @@ test("communications worker prepares AI-EIGO invitation email just in time and u
   assert.equal(result.ok, true);
   assert.deepEqual(prepared, ["invite-1"]);
   assert.equal(emails[0].recipient, "student@example.com");
+  assert.equal(emails[0].subject, "【Bee School】AI-EIGO Voice Check ご利用のご案内");
+  assert.equal(emails[0].text, emails[0].body);
   assert.match(emails[0].body, /https:\/\/ai-eigo\.com\/invite\/secure-token/);
+  assert.match(emails[0].html, /<a href="https:\/\/ai-eigo\.com\/invite\/secure-token"[^>]*>利用を開始する<\/a>/);
   assert.equal(records[0].status, "succeeded");
   assert.equal(records[0].externalId, "resend-message-1");
   assert.match(communicationsWorkerSource, /createResendSenderClient/);
   assert.match(communicationsWorkerSource, /prepareAiEigoInvitationEmail/);
+});
+
+test("Resend receives distinct personal HTML and text invitations while normal email remains unchanged", async () => {
+  const requests = [];
+  const fetchImpl = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true, async text() { return JSON.stringify({ id: `message-${requests.length}` }); } };
+  };
+  const actions = ["student-one", "student-two"].map((invitationId) => ({
+    idempotency_key: `invite-${invitationId}`,
+    provider: "resend",
+    action_type: "send_email",
+    request_payload: { template_key: AI_EIGO_INVITATION_TEMPLATE_KEY, invitation_id: invitationId }
+  }));
+  actions.push({
+    idempotency_key: "normal-email",
+    provider: "resend",
+    action_type: "send_email",
+    request_payload: { recipient: "office@example.com", subject: "Normal email", body: "Normal message" }
+  });
+
+  const result = await processQueuedCommunicationActions({
+    config: { resendApiKey: "invite-key", aiEigoInvitationEmailFrom: "AI-EIGO <hello@ai-eigo.com>", beeSchoolResendApiKey: "office-key", beeSchoolEmailFrom: "Bee School <office@example.com>", maxActions: 10 },
+    aiEigoInvitationResendProvider: createResendSenderClient({ apiKey: "invite-key", from: "AI-EIGO <hello@ai-eigo.com>" }, fetchImpl),
+    resendProvider: createResendSenderClient({ apiKey: "office-key", from: "Bee School <office@example.com>" }, fetchImpl),
+    repository: {
+      async enqueueDueNoShowFollowUps() { return []; },
+      async claimPendingIntegrationActions() { return actions; },
+      async prepareAiEigoInvitationEmail({ invitationId }) {
+        const url = `https://ai-eigo.com/invite/token-${invitationId}`;
+        return {
+          recipient: `${invitationId}@example.com`,
+          subject: "【Bee School】AI-EIGO Voice Check ご利用のご案内",
+          body: `${expectedInvitationBody(url)}${invitationId === "student-one" ? "\n<script>alert(1)</script>" : ""}`
+        };
+      },
+      async recordActionResult() {}
+    },
+    logger: quietLogger()
+  });
+
+  assert.equal(result.succeeded, 3);
+  assert.equal(requests.length, 3);
+  for (const [index, invitationId] of ["student-one", "student-two"].entries()) {
+    const url = `https://ai-eigo.com/invite/token-${invitationId}`;
+    assert.equal(requests[index].subject, "【Bee School】AI-EIGO Voice Check ご利用のご案内");
+    assert.equal(requests[index].text, `${expectedInvitationBody(url)}${invitationId === "student-one" ? "\n<script>alert(1)</script>" : ""}`);
+    assert.match(requests[index].text, new RegExp(`\\n${url}\\n`));
+    assert.match(requests[index].html, new RegExp(`<a href="${url}"[^>]*>利用を開始する</a>`));
+    assert.match(requests[index].html, new RegExp(`<a href="${url}"[^>]*>${url}</a>`));
+    assert.match(requests[index].html, /<html lang="ja">/);
+    assert.doesNotMatch(requests[index].html, /\[CTA:/);
+    assert.match(requests[index].html, /<table[^>]*width="100%"[^>]*max-width:600px;table-layout:fixed/);
+    assert.doesNotMatch(requests[index].html, /<img\b/i);
+    assert.match(requests[index].html, /<span[^>]*>Bee School<\/span>/);
+    assert.match(requests[index].html, /<p[^>]*>Bee Schoolの生徒・保護者の皆さまへ<\/p>/);
+    assert.match(requests[index].html, /<p[^>]*>Bee Schoolに通う生徒の皆さまは、特典としてAI-EIGOの「Voice Check（発音チェック）」機能を無料でご利用いただけます。<\/p>/);
+    assert.match(requests[index].html, /<p[^>]*>以下のボタンからAI-EIGOにアクセスし、ログインまたは新規登録をお願いいたします。<\/p>/);
+    assert.match(requests[index].html, /<p[^>]*>ボタンが開かない場合は、以下のURLをコピーしてブラウザに貼り付けてください。<\/p>/);
+    assert.match(requests[index].html, /<p[^>]*>このご案内リンクはお送りした方専用です。他の方への転送はお控えください。<\/p>/);
+    assert.match(requests[index].html, /<p[^>]*>このリンクは送信後14日間有効です。<\/p>/);
+    assert.match(requests[index].html, /<td align="center" bgcolor="#087a50"/);
+    assert.match(requests[index].html, /style="[^"]*background-color:#087a50;[^"]*color:#ffffff;[^"]*text-decoration:none;">利用を開始する<\/a>/);
+    assert.match(requests[index].html, /word-break:break-all;overflow-wrap:anywhere/);
+    const buttonIndex = requests[index].html.indexOf(">利用を開始する</a>");
+    const fallbackInstructionIndex = requests[index].html.indexOf("ボタンが開かない場合は、以下のURLをコピーしてブラウザに貼り付けてください。");
+    const fallbackIndex = requests[index].html.indexOf(`>${url}</a>`);
+    const expiryIndex = requests[index].html.indexOf("このリンクは送信後14日間有効です。");
+    assert.ok(buttonIndex < fallbackInstructionIndex && fallbackInstructionIndex < fallbackIndex && fallbackIndex < expiryIndex);
+    assert.match(requests[index].html, /<td style="[^"]*border-top:1px solid #e5e9ef;[^"]*">Bee School<\/td>/);
+    assert.doesNotMatch(requests[index].html, /white-space:pre-wrap/);
+    assert.doesNotMatch(requests[index].html, /word-break:keep-all/);
+  }
+  assert.match(requests[0].html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(requests[0].html, /<script>/);
+  assert.doesNotMatch(requests[0].text, /token-student-two/);
+  assert.doesNotMatch(requests[1].html, /token-student-one/);
+  assert.equal(requests[2].subject, "Normal email");
+  assert.equal(requests[2].text, "Normal message");
+  assert.match(requests[2].html, /<pre /);
+  assert.doesNotMatch(requests[2].html, /利用を開始する/);
+});
+
+test("invitation renderer still accepts the previous queued CTA marker", () => {
+  const url = "https://ai-eigo.com/invite/legacy-test-token";
+  const html = renderAiEigoInvitationHtml(`Bee Schoolの生徒さまへ\n\n[利用を開始する]\n${url}\n\nBee School`);
+  assert.match(html, new RegExp(`<a href="${url}"[^>]*>利用を開始する</a>`));
+  assert.doesNotMatch(html, /<img\b|\[利用を開始する\]/i);
 });
 
 test("REST communications repository calls the service-only AI-EIGO email preparation RPC", async () => {
@@ -400,6 +539,26 @@ function quietLogger() {
   return {
     error() {}
   };
+}
+
+function expectedInvitationBody(url) {
+  return `Bee Schoolの生徒・保護者の皆さまへ
+
+Bee Schoolに通う生徒の皆さまは、特典としてAI-EIGOの「Voice Check（発音チェック）」機能を無料でご利用いただけます。
+
+以下のボタンからAI-EIGOにアクセスし、ログインまたは新規登録をお願いいたします。
+
+[CTA: 利用を開始する]
+
+ボタンが開かない場合は、以下のURLをコピーしてブラウザに貼り付けてください。
+
+${url}
+
+このご案内リンクはお送りした方専用です。他の方への転送はお控えください。
+
+このリンクは送信後14日間有効です。
+
+Bee School`;
 }
 
 function extractMigrationFunctionSql(sql, functionName, grantArgs) {

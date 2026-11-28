@@ -212,9 +212,12 @@ export function AdminShell({ children }) {
         badgeValue = formatCountBadgeValue(ricoCancellationCount);
       }
 
+      const isActive = isNavigationItemActive(pathname, item.href);
+
       return (
         <Link
-          className={`nav-link ${isNavigationItemActive(pathname, item.href) ? "active" : ""}`}
+          aria-current={isActive ? "page" : undefined}
+          className={`nav-link ${isActive ? "active" : ""}`}
           href={item.href === "/finance/" && badgeValue ? "/finance/?filter=rico-cancellation#monthly-billing" : item.href}
           key={item.href}
           onClick={() => {
@@ -226,7 +229,7 @@ export function AdminShell({ children }) {
         >
           <span className="nav-link-label">
             <ActionIcon className="nav-link-icon" name={navigationIcons[item.href]} />
-            <span>{item.label}</span>
+            <span className="nav-link-text">{item.label}</span>
           </span>
           {badgeValue ? <span className={`nav-count-badge ${item.href === "/questions/" ? "danger" : "warning"}`}>{badgeValue}</span> : null}
         </Link>
